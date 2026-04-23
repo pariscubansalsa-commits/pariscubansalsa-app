@@ -406,9 +406,13 @@ async def list_entries(type: Optional[str] = None, featured: Optional[bool] = No
 @api_router.get("/entries/{entry_id}", response_model=Entry)
 async def get_entry(entry_id: str):
     e = await db.entries.find_one({"id": entry_id}, {"_id": 0})
-    if not e:
-        raise HTTPException(status_code=404, detail="Entry not found")
-    return Entry(**e)
+    if e:
+        return Entry(**e)
+    # Fallback: check calendar feed (read-only events)
+    for cal_ev in fetch_calendar_entries():
+        if cal_ev.get("id") == entry_id:
+            return Entry(**cal_ev)
+    raise HTTPException(status_code=404, detail="Entry not found")
 
 
 @api_router.post("/entries", response_model=Entry)

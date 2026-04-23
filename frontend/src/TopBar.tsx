@@ -37,10 +37,10 @@ export default function TopBar() {
         >
           <View style={styles.logoMark}>
             <Image
-              source={require("../assets/images/pcs-logo.png")}
-              style={styles.logoImg}
-              resizeMode="contain"
-            />
+          source={require("../assets/images/pcs-logo.png")}
+          style={styles.logoImg}
+          resizeMode="cover"
+        />
           </View>
           <View style={styles.logoText}>
             <Text style={styles.logoRow1}>Paris Cuban</Text>
@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
-  logoImg: { width: "88%", height: "88%" },
+  logoImg: { width: "100%", height: "100%" },
   logoText: { justifyContent: "center" },
   logoRow1: {
     fontFamily: FONTS.heading,

@@ -23,7 +23,7 @@ export default function Index() {
           </Text>
         </>
       }
-      subtitle="L'agenda vivant synchronisé depuis notre Google Calendar. Soirées, workshops, festivals — actualisé toutes les 10 minutes."
+      subtitle="L'agenda vivant de la communauté Paris Cuban Salsa — soirées, workshops, festivals. Actualisé en permanence."
       handleAuthCallback
     />
   );

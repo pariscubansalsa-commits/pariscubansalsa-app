@@ -9,6 +9,7 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { api, EntryItem, EntryType } from "./api";
 import EntryCard from "./EntryCard";
 import TopBar from "./TopBar";
@@ -35,6 +36,7 @@ export default function EntriesScreen({
   useCalendar = false,
   handleAuthCallback = false,
 }: Props) {
+  const router = useRouter();
   const [items, setItems] = useState<EntryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,6 +67,8 @@ export default function EntriesScreen({
 
   if (isAuthCallback) return <AuthCallback />;
 
+  const openDetail = (id: string) => router.push(`/entry/${id}` as any);
+
   return (
     <SafeAreaView style={styles.safe} edges={["left", "right"]}>
       <TopBar />
@@ -72,7 +76,9 @@ export default function EntriesScreen({
         testID={`entries-${type || "agenda"}`}
         data={items}
         keyExtractor={(i) => i.id}
-        renderItem={({ item }) => <EntryCard entry={item} />}
+        renderItem={({ item }) => (
+          <EntryCard entry={item} onPress={() => openDetail(item.id)} />
+        )}
         contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: SPACING.screen }}
         ListHeaderComponent={
           <>

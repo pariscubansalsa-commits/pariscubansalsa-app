@@ -61,11 +61,13 @@ export default function EntryCard({
   onAdminEdit,
   onAdminDelete,
   isAdmin,
+  onPress,
 }: {
   entry: EntryItem;
   onAdminEdit?: () => void;
   onAdminDelete?: () => void;
   isAdmin?: boolean;
+  onPress?: () => void;
 }) {
   const isFestival = entry.type === "festival";
   const { day, month, weekday } = formatDateFR(entry.date);
@@ -73,8 +75,13 @@ export default function EntryCard({
     ? formatDateRangeFR(entry.date, entry.end_date)
     : null;
 
+  const Wrapper: any = onPress ? TouchableOpacity : View;
+  const wrapperProps = onPress
+    ? { onPress, activeOpacity: 0.85, testID: `entry-card-${entry.id}` }
+    : { testID: `entry-card-${entry.id}` };
+
   return (
-    <View style={styles.card} testID={`entry-card-${entry.id}`}>
+    <Wrapper style={styles.card} {...wrapperProps}>
       <View style={styles.row}>
         {/* Date block */}
         <View style={styles.dateBlock}>
@@ -168,7 +175,7 @@ export default function EntryCard({
       {entry.cover_photo && (
         <Image source={{ uri: entry.cover_photo }} style={styles.cover} />
       )}
-    </View>
+    </Wrapper>
   );
 }
 
