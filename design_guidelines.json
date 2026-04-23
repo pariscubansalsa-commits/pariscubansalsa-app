@@ -1,0 +1,135 @@
+{
+  "brand": {
+    "name": "Paris Cuban Salsa",
+    "logo_instructions": "Text-based logo. 'Paris Cuban' in Playfair Display (Black, standard weight), 'Salsa' in Playfair Display (Italic) colored in yellow (#F5C518). No generic icons."
+  },
+  "theme": {
+    "mode": "Light",
+    "archetype": "Archetype 4 (Swiss & High-Contrast) + Editorial / Luxury",
+    "rationale": "An editorial, high-end magazine aesthetic elevates community photos into art. White backgrounds and stark black typography provide the classic print editorial framework, while the energetic yellow (#F5C518) injects the dynamic vibrancy of Cuban Salsa. Minimalist framing allows the photography to dominate."
+  },
+  "colors": {
+    "background": "#FFFFFF",
+    "surface": "#F9F9FB",
+    "primary_text": "#0A0A0A",
+    "secondary_text": "#52525B",
+    "accent_yellow": "#F5C518",
+    "border": "#E4E4E7",
+    "overlay": "rgba(0, 0, 0, 0.6)",
+    "lightbox_bg": "#000000"
+  },
+  "typography": {
+    "heading_font": "Playfair Display",
+    "body_font": "Manrope",
+    "scales": {
+      "h1": {
+        "size": 40,
+        "lineHeight": 44,
+        "letterSpacing": -1,
+        "fontFamily": "Playfair Display"
+      },
+      "h2": {
+        "size": 32,
+        "lineHeight": 36,
+        "letterSpacing": -0.5,
+        "fontFamily": "Playfair Display"
+      },
+      "h3": {
+        "size": 24,
+        "lineHeight": 32,
+        "fontFamily": "Playfair Display"
+      },
+      "body": {
+        "size": 16,
+        "lineHeight": 24,
+        "fontFamily": "Manrope"
+      },
+      "caption": {
+        "size": 13,
+        "lineHeight": 18,
+        "fontFamily": "Manrope",
+        "color": "#52525B"
+      },
+      "overline": {
+        "size": 12,
+        "letterSpacing": 1.5,
+        "textTransform": "uppercase",
+        "fontFamily": "Manrope",
+        "fontWeight": "bold"
+      }
+    }
+  },
+  "layout_spacing": {
+    "screen_padding": 24,
+    "section_gap": 48,
+    "item_gap": 16,
+    "grid_strategy": "Editorial layout. Avoid uniform squares when possible. Use masonry grids or generous edge-to-edge cover photos to break up the monotony. Photos must have breathing room."
+  },
+  "components": {
+    "event_card": {
+      "container": "Flat, sharp corners (borderRadius: 0 or 4). No drop shadows. Use 1px black or subtle gray borders to create tension, or go completely edgeless.",
+      "image": "Max height 60vh. Fill width. Maintain aspect ratio.",
+      "content": "Placed below the image with generous top padding (16px), styled like a magazine headline."
+    },
+    "lightbox": {
+      "container": "Immersive full-screen. Background #000000. Hide status bar.",
+      "controls": "Minimalist white iconography (close, share, download) with safe-area padding.",
+      "tag_display": "Bottom sheet or floating bottom panel with a soft drag handle, white background, displaying a clean list of tagged names/handles."
+    },
+    "buttons": {
+      "primary": {
+        "backgroundColor": "#F5C518",
+        "color": "#0A0A0A",
+        "borderRadius": 0,
+        "borderWidth": 1,
+        "borderColor": "#0A0A0A",
+        "paddingVertical": 16,
+        "paddingHorizontal": 24,
+        "textTransform": "uppercase",
+        "fontFamily": "Manrope",
+        "fontWeight": "bold",
+        "letterSpacing": 1
+      },
+      "secondary": {
+        "backgroundColor": "transparent",
+        "color": "#0A0A0A",
+        "borderRadius": 0,
+        "borderWidth": 1,
+        "borderColor": "#0A0A0A",
+        "paddingVertical": 16,
+        "paddingHorizontal": 24
+      }
+    },
+    "forms": {
+      "inputs": "Sharp rectangular borders (border-width: 1px, border-color: #E4E4E7). Padding 16px. Background #FFFFFF. Focus state changes border to #0A0A0A. No soft pills."
+    },
+    "tags": {
+      "style": "Small rectangular chips, background #F9F9FB, border 1px solid #E4E4E7, text #0A0A0A. Font size 12px, bold."
+    }
+  },
+  "motion_and_interactions": {
+    "navigation": "Native stack transitions. Fast and responsive.",
+    "lightbox_transition": "Shared element transition (zoom from grid to fullscreen) is preferred, or a quick fade-in.",
+    "active_states": "Buttons should instantly reduce opacity to 0.7 on press. No bouncy spring animations."
+  },
+  "media": {
+    "placeholder_images": {
+      "cover_event_1": "https://images.unsplash.com/photo-1754684223462-6344053b91df?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwzfHxjdWJhbiUyMHNhbHNhJTIwZGFuY2luZ3xlbnwwfHx8fDE3NzY5MzM0ODB8MA&ixlib=rb-4.1.0&q=85",
+      "cover_event_2": "https://images.pexels.com/photos/16763609/pexels-photo-16763609.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "cover_event_3": "https://images.pexels.com/photos/11362556/pexels-photo-11362556.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "gallery_editorial_bw": "https://images.unsplash.com/photo-1574091103583-1f256526b44e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwyfHxjdWJhbiUyMHNhbHNhJTIwZGFuY2luZ3xlbnwwfHx8fDE3NzY5MzM0ODB8MA&ixlib=rb-4.1.0&q=85",
+      "gallery_nightclub": "https://images.pexels.com/photos/342520/pexels-photo-342520.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install and use Expo Google Fonts to load 'Playfair Display' (headings) and 'Manrope' (body/UI).",
+    "Strictly follow the color palette. Backgrounds must be pure white (#FFFFFF), text pure black (#0A0A0A), accents yellow (#F5C518).",
+    "Avoid generic soft UI patterns (like heavily rounded corners and drop shadows). Rely on sharp borders (1px) and typography for hierarchy to maintain the editorial vibe.",
+    "Implement the 'Paris Cuban Salsa' logo exactly as requested: 'Paris Cuban' in Playfair Display (Black), 'Salsa' in Playfair Display Italic (#F5C518).",
+    "The Gallery Lightbox should use react-native-reanimated or a full-screen native modal. It must have a pure black (#000000) background for maximum contrast against the photos.",
+    "For the tag display in the lightbox, implement a clean bottom sheet containing a list of tagged names or @instagram handles.",
+    "Ensure the Instagram Story shareable link and native share sheet utilize Expo Sharing.",
+    "All interactive elements MUST include a 'testID' attribute (e.g., testID='event-card', testID='lightbox-close') for automated testing.",
+    "The Admin dashboard forms (create event, upload photos) should use brutalist styling: sharp input borders, large text, and bold yellow submit buttons."
+  ]
+}
