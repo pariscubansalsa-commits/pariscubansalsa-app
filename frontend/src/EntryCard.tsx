@@ -287,14 +287,3 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 });
-S.border,
-    padding: 6,
-  },
-  cover: {
-    width: "100%",
-    height: 160,
-    marginTop: 14,
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-  },
-});

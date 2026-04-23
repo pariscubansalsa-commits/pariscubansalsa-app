@@ -7,6 +7,7 @@ export default function Index() {
   return (
     <EntriesScreen
       overline="SORTIES DU MOMENT"
+      showFeatured
       headline={
         <>
           Le mois{" "}

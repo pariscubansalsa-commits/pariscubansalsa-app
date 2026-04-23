@@ -15,10 +15,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { api, EntryItem, EntryType } from "../../src/api";
 import EntryCard from "../../src/EntryCard";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
+import { Image } from "react-native";
 
 const TYPES: { key: EntryType; label: string }[] = [
   { key: "agenda", label: "Agenda" },
@@ -37,6 +39,8 @@ const EMPTY = {
   description: "",
   instructor: "",
   ticket_link: "",
+  cover_photo: null as string | null,
+  featured: false,
 };
 
 export default function AdminEntries() {
@@ -86,8 +90,26 @@ export default function AdminEntries() {
       description: e.description || "",
       instructor: e.instructor || "",
       ticket_link: e.ticket_link || "",
+      cover_photo: e.cover_photo || null,
+      featured: !!e.featured,
     });
     setModalOpen(true);
+  };
+
+  const pickCover = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+    if (!res.canceled && res.assets[0]?.base64) {
+      const a = res.assets[0];
+      setForm({
+        ...form,
+        cover_photo: `data:${a.mimeType || "image/jpeg"};base64,${a.base64}`,
+      });
+    }
   };
 
   const submit = async () => {
@@ -216,6 +238,41 @@ export default function AdminEntries() {
               )}
               <Field label="DESCRIPTION" testID="entry-description" value={form.description} onChange={(v) => setForm({ ...form, description: v })} multiline />
               <Field label="LIEN TICKET (URL)" testID="entry-ticket" value={form.ticket_link} onChange={(v) => setForm({ ...form, ticket_link: v })} placeholder="https://www.helloasso.com/..." autoCapitalize="none" />
+
+              <Text style={[styles.label, { marginTop: 14 }]}>PHOTO / AFFICHE</Text>
+              <TouchableOpacity testID="entry-cover-picker" style={styles.coverPicker} onPress={pickCover}>
+                {form.cover_photo ? (
+                  <Image source={{ uri: form.cover_photo }} style={styles.coverPreview} />
+                ) : (
+                  <View style={styles.coverEmpty}>
+                    <Ionicons name="image-outline" size={24} color={COLORS.secondaryText} />
+                    <Text style={styles.coverEmptyTxt}>CHOISIR UNE IMAGE</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="entry-featured-toggle"
+                style={[styles.featureRow, form.featured && styles.featureRowOn]}
+                onPress={() => setForm({ ...form, featured: !form.featured })}
+              >
+                <View style={styles.featureLeft}>
+                  <Ionicons
+                    name={form.featured ? "heart" : "heart-outline"}
+                    size={18}
+                    color={form.featured ? COLORS.primaryText : COLORS.secondaryText}
+                  />
+                  <View>
+                    <Text style={styles.featureTitle}>Coup de cœur</Text>
+                    <Text style={styles.featureSub}>
+                      Mise en avant dans le carrousel d&apos;accueil (partenaires payants)
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.switch, form.featured && styles.switchOn]}>
+                  <View style={[styles.switchDot, form.featured && styles.switchDotOn]} />
+                </View>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 testID="submit-entry"
@@ -365,7 +422,79 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primaryText,
     paddingVertical: 16,
     alignItems: "center",
+    borderRadius: 40,
   },
+  coverPicker: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: COLORS.surface,
+  },
+  coverPreview: { width: "100%", height: "100%" },
+  coverEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  coverEmptyTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 1.3,
+    color: COLORS.secondaryText,
+  },
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+  },
+  featureRowOn: {
+    borderColor: COLORS.accentYellow,
+    backgroundColor: "#FFFBEA",
+  },
+  featureLeft: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    flex: 1,
+  },
+  featureTitle: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 13,
+    color: COLORS.primaryText,
+  },
+  featureSub: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.secondaryText,
+    marginTop: 2,
+    maxWidth: 220,
+  },
+  switch: {
+    width: 38,
+    height: 22,
+    borderRadius: 12,
+    backgroundColor: "#E4E4E7",
+    padding: 2,
+    justifyContent: "center",
+  },
+  switchOn: { backgroundColor: COLORS.accentYellow },
+  switchDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    alignSelf: "flex-start",
+  },
+  switchDotOn: { alignSelf: "flex-end" },
   primaryBtnTxt: {
     fontFamily: FONTS.bodyBold,
     fontSize: 12,

@@ -12,16 +12,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api, EntryItem, EntryType } from "./api";
 import EntryCard from "./EntryCard";
 import TopBar from "./TopBar";
+import FeaturedCarousel from "./FeaturedCarousel";
 import { COLORS, FONTS, SPACING } from "./theme";
 import AuthCallback from "./AuthCallback";
 
 type Props = {
-  type?: EntryType; // undefined = agenda (accueil)
+  type?: EntryType;
   overline: string;
   headline: React.ReactNode;
   subtitle: string;
+  showFeatured?: boolean;
   handleAuthCallback?: boolean;
-  filterFn?: (e: EntryItem) => boolean;
 };
 
 export default function EntriesScreen({
@@ -29,8 +30,8 @@ export default function EntriesScreen({
   overline,
   headline,
   subtitle,
+  showFeatured = false,
   handleAuthCallback = false,
-  filterFn,
 }: Props) {
   const [items, setItems] = useState<EntryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,15 +46,14 @@ export default function EntriesScreen({
   const load = useCallback(async () => {
     try {
       const data = await api.listEntries(type);
-      const filtered = filterFn ? data.filter(filterFn) : data;
-      setItems(filtered);
+      setItems(data);
     } catch (e) {
       console.log("entries err", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [type, filterFn]);
+  }, [type]);
 
   useEffect(() => {
     if (!isAuthCallback) load();
@@ -69,17 +69,21 @@ export default function EntriesScreen({
         data={items}
         keyExtractor={(i) => i.id}
         renderItem={({ item }) => <EntryCard entry={item} />}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: SPACING.screen }}
         ListHeaderComponent={
-          <View style={styles.hero}>
-            <Text style={styles.overline}>{overline}</Text>
-            <Text style={styles.title}>{headline}</Text>
-            <Text style={styles.subtitle}>{subtitle}</Text>
-            <View style={styles.divider} />
-            <Text style={styles.count}>
-              {items.length} {items.length <= 1 ? "ENTRÉE" : "ENTRÉES"}
-            </Text>
-          </View>
+          <>
+            {showFeatured && <FeaturedCarousel />}
+            <View style={styles.hero}>
+              <Text style={styles.overline}>{overline}</Text>
+              <Text style={styles.title}>{headline}</Text>
+              <Text style={styles.subtitle}>{subtitle}</Text>
+              <View style={styles.countPill}>
+                <Text style={styles.count}>
+                  {items.length} {items.length <= 1 ? "ENTRÉE" : "ENTRÉES"}
+                </Text>
+              </View>
+            </View>
+          </>
         }
         ListEmptyComponent={
           loading ? (
@@ -105,7 +109,6 @@ export default function EntriesScreen({
             tintColor={COLORS.primaryText}
           />
         }
-        style={styles.list}
       />
     </SafeAreaView>
   );
@@ -113,20 +116,19 @@ export default function EntriesScreen({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  list: { paddingHorizontal: SPACING.screen },
-  hero: { paddingTop: 24, paddingBottom: 20 },
+  hero: { paddingTop: 20, paddingBottom: 18 },
   overline: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
-    letterSpacing: 1.8,
+    letterSpacing: 1.6,
     color: COLORS.secondaryText,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   title: {
     fontFamily: FONTS.heading,
-    fontSize: 42,
-    lineHeight: 46,
-    letterSpacing: -1.2,
+    fontSize: 38,
+    lineHeight: 42,
+    letterSpacing: -1,
     color: COLORS.primaryText,
   },
   subtitle: {
@@ -134,17 +136,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     color: COLORS.secondaryText,
-    marginTop: 14,
-    marginBottom: 18,
+    marginTop: 12,
+    marginBottom: 14,
   },
-  divider: { height: 1, backgroundColor: COLORS.primaryText },
+  countPill: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#F5F5F5",
+    borderRadius: 40,
+  },
   count: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
-    letterSpacing: 1.8,
-    color: COLORS.primaryText,
-    marginTop: 14,
-    marginBottom: 18,
+    letterSpacing: 1.2,
+    color: COLORS.secondaryText,
   },
   empty: { padding: 40, alignItems: "center" },
   emptyTxt: { fontFamily: FONTS.heading, fontSize: 22, color: COLORS.primaryText },
