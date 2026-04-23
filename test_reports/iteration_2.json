@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 2 — v2 feature pass (6-tab community platform + admin entries/teachers). Backend: 27/27 pytest tests passing against public URL, covering /api/entries list+filter (agenda/soiree/workshop/festival), /api/entries 400 for invalid type, admin gating (401 without bearer), full CRUD lifecycle for entries, full CRUD lifecycle for teachers, and regression on /api/events + /api/auth/me. Frontend (430x900 mobile viewport): Home renders PCS logo badge + 'Paris Cuban Salsa' with italic yellow 'Salsa', hero 'Le mois salsa.' with yellow italic, overline 'SORTIES DU MOMENT', 9 entry cards with date blocks and 8 ticket buttons (1 agenda intentionally has no ticket link). Bottom tab bar shows 6 tabs (Accueil, Soirées, Workshops, Festivals, Profs, Galerie), all tappable. Filtered screens render the right counts (+3 soirée, +2 workshop, +2 festival). Festivals show month range (MARS…JUIN / JUIL). Profs tab lists 3 teachers; tap navigates to /profs/{id} detail with Instagram link. Galerie shows Bodeguita/Milonga (regression). /login shows 'CONTINUER AVEC GOOGLE' (French). Admin: with localStorage pcs_session_token set, /admin loads dashboard with 3 sections (Agenda & sorties, Professeurs, Galerie photo). /admin/entries shows filter tabs (filter-agenda/soiree/workshop/festival), 'AJOUTER UNE ENTRÉE' opens modal with testIDs entry-title/date/time/venue/address/description/ticket + submit-entry (CRÉER). /admin/teachers shows all 3 seeded teachers with edit/delete icons + 'AJOUTER UN PROFESSEUR'. /admin/gallery still works (regression).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pcs_api.py",
+    "/app/backend/tests/test_pcs_v2.py",
+    "/app/test_reports/pytest/pcs_v2_results.xml",
+    "/app/test_reports/pytest/pcs_results.xml"
+  ],
+  "action_items": [
+    "All v2 features pass. No action required.",
+    "Console 401 at load is from /api/auth/me probing for session while logged out — expected behaviour of AuthProvider, safe to ignore.",
+    "Expo supervisor err.log shows periodic ngrok 'Premature close'; preview serves fine via the public EXPO_PACKAGER_HOSTNAME, so this is preview-infra noise."
+  ],
+  "critical_code_review_comments": [
+    "server.py: entries/teachers endpoints are clean — UUID ids, no _id leak (projection used), admin gating via require_admin dependency, 400 on invalid type, 404 handling present.",
+    "server.py update_entry/update_teacher do a merge+return pattern which works but re-reading from DB after update would be slightly safer; current approach is fine because payload is validated and id is preserved.",
+    "seed.py idempotency: entries and teachers are only seeded when collection is empty — re-running is safe but will not refresh content if schema changes. Acceptable for MVP.",
+    "CORS allow_origins=['*'] with allow_credentials=True is still present (carried over from iteration 1) — browsers reject credentialed cookie flows with wildcard. Non-blocking since admin token is read from Authorization header in tests and from localStorage-derived bearer in the web client. Recommend tightening origins for production.",
+    "Frontend (tabs) keep all tabs mounted (expo-router default), which means testID elements from inactive tabs remain in DOM. Our counts validated by deltas between tabs; not a bug but noted for future playwright tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pcs_v2.py"
+  ],
+  "success_rate": {"backend": "100% (27/27 v2 + regression)", "frontend": "100%"},
+  "seed_data_creation": "Re-ran python /app/backend/seed.py; admin session (test_session_pcs_admin_000), 2 gallery events, 9 entries (2 agenda, 3 soirée, 2 workshop, 2 festival), 3 teachers all present. Lifecycle tests create TEST_Entry_PCS and TEST_Teacher_PCS then clean up via DELETE.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend public URL: https://rhythm-frames-3.preview.emergentagent.com. Admin bearer: test_session_pcs_admin_000. For admin UI, set localStorage.pcs_session_token before navigating to /admin. Key testIDs on admin/entries: create-entry-btn, filter-agenda, filter-soiree, filter-workshop, filter-festival, entry-card-{id}, edit-entry-{id}, delete-entry-{id}, ticket-{id}, entry-title, entry-date, entry-time, entry-venue, entry-address, entry-description, entry-ticket, submit-entry. On (tabs)/profs: profs-list, teacher-{id}. Public screens use entry-card-{id} + ticket-{id}. Pytest suites: /app/backend/tests/test_pcs_api.py (20 tests — v1 events/photos/tags/auth) and /app/backend/tests/test_pcs_v2.py (27 tests — entries/teachers + regression). Run both with `EXPO_PUBLIC_BACKEND_URL=https://rhythm-frames-3.preview.emergentagent.com pytest /app/backend/tests/ -v`.",
+  "rca_of_issue": "No issues. Both v1 (gallery) and v2 (entries+teachers+6 tabs+admin) are fully functional end-to-end on mobile web preview. French locale consistent across all public-facing text (Accueil/Soirées/Workshops/Festivals/Profs/Galerie/Connexion/ACHETER LE TICKET/CONTINUER AVEC GOOGLE/AJOUTER UNE ENTRÉE/AJOUTER UN PROFESSEUR/CRÉER/ANNULER)."
+}

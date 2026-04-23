@@ -1,7 +1,7 @@
 export const COLORS = {
   background: "#FFFFFF",
   surface: "#F9F9FB",
-  primaryText: "#0A0A0A",
+  primaryText: "#111111",
   secondaryText: "#52525B",
   accentYellow: "#F5C518",
   border: "#E4E4E7",
@@ -12,13 +12,13 @@ export const COLORS = {
 export const FONTS = {
   heading: "PlayfairDisplay_700Bold",
   headingItalic: "PlayfairDisplay_700Bold_Italic",
-  body: "Manrope_400Regular",
-  bodyBold: "Manrope_700Bold",
-  bodySemi: "Manrope_600SemiBold",
+  body: "DMSans_400Regular",
+  bodySemi: "DMSans_500Medium",
+  bodyBold: "DMSans_700Bold",
 };
 
 export const SPACING = {
-  screen: 24,
-  section: 48,
+  screen: 20,
+  section: 40,
   item: 16,
 };

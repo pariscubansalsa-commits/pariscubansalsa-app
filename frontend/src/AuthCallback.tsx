@@ -47,7 +47,7 @@ export default function AuthCallback() {
   return (
     <View style={styles.wrap}>
       <ActivityIndicator color={COLORS.primaryText} />
-      <Text style={styles.txt}>Signing you in…</Text>
+      <Text style={styles.txt}>Connexion en cours…</Text>
     </View>
   );
 }

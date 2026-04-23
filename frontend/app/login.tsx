@@ -36,13 +36,13 @@ export default function Login() {
       </View>
 
       <View style={styles.body}>
-        <Text style={styles.overline}>ADMIN ACCESS</Text>
+        <Text style={styles.overline}>ACCÈS ADMINISTRATEUR</Text>
         <Text style={styles.title}>
-          For the <Text style={styles.italic}>keepers</Text> of the archive.
+          Pour les <Text style={styles.italic}>gardiens</Text> de la communauté.
         </Text>
         <Text style={styles.sub}>
-          Only event organizers can upload photos and manage galleries. Sign in
-          with your Google account to continue.
+          Seuls les organisateurs peuvent créer des événements et gérer le
+          contenu. Connectez-vous avec votre compte Google pour continuer.
         </Text>
 
         <TouchableOpacity
@@ -52,7 +52,7 @@ export default function Login() {
           activeOpacity={0.8}
         >
           <Ionicons name="logo-google" size={16} color={COLORS.primaryText} />
-          <Text style={styles.primaryTxt}>CONTINUE WITH GOOGLE</Text>
+          <Text style={styles.primaryTxt}>CONTINUER AVEC GOOGLE</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -60,11 +60,11 @@ export default function Login() {
           onPress={() => router.replace("/")}
           style={styles.secondary}
         >
-          <Text style={styles.secondaryTxt}>BACK TO GALLERY</Text>
+          <Text style={styles.secondaryTxt}>RETOUR À L&apos;ACCUEIL</Text>
         </TouchableOpacity>
 
         <Text style={styles.note}>
-          Visitors don&apos;t need an account. Just browse, tag, and share.
+          Les visiteurs n&apos;ont pas besoin de compte. Naviguez, taguez et partagez librement.
         </Text>
       </View>
     </SafeAreaView>

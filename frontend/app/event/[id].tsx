@@ -218,7 +218,7 @@ export default function EventDetail() {
             activeOpacity={0.8}
           >
             <Ionicons name="logo-instagram" size={16} color={COLORS.primaryText} />
-            <Text style={styles.shareBtnTxt}>SHARE TO INSTAGRAM STORY</Text>
+            <Text style={styles.shareBtnTxt}>PARTAGER EN STORY INSTAGRAM</Text>
           </TouchableOpacity>
 
           {user?.is_admin && (
@@ -228,7 +228,7 @@ export default function EventDetail() {
               onPress={() => router.push(`/admin/event/${event.id}`)}
             >
               <Ionicons name="cloud-upload-outline" size={16} color={COLORS.primaryText} />
-              <Text style={styles.shareBtnTxt}>MANAGE & UPLOAD</Text>
+              <Text style={styles.shareBtnTxt}>GÉRER & UPLOADER</Text>
             </TouchableOpacity>
           )}
         </View>

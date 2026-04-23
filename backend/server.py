@@ -75,6 +75,55 @@ class PhotosUpload(BaseModel):
     photos: List[str]  # list of base64 data URIs
 
 
+# Generic entry for agenda / soirées / workshops / festivals
+class Entry(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: str  # 'agenda' | 'soiree' | 'workshop' | 'festival'
+    title: str
+    date: str  # ISO start date
+    end_date: Optional[str] = None  # for festivals
+    time: Optional[str] = ""  # "20:30" or "14:00 - 17:00"
+    venue: Optional[str] = ""
+    address: Optional[str] = ""
+    description: Optional[str] = ""
+    instructor: Optional[str] = ""  # for workshops
+    ticket_link: Optional[str] = ""
+    cover_photo: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EntryCreate(BaseModel):
+    type: str
+    title: str
+    date: str
+    end_date: Optional[str] = None
+    time: Optional[str] = ""
+    venue: Optional[str] = ""
+    address: Optional[str] = ""
+    description: Optional[str] = ""
+    instructor: Optional[str] = ""
+    ticket_link: Optional[str] = ""
+    cover_photo: Optional[str] = None
+
+
+class Teacher(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    bio: Optional[str] = ""
+    photo: Optional[str] = None
+    instagram: Optional[str] = ""
+    facebook: Optional[str] = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class TeacherCreate(BaseModel):
+    name: str
+    bio: Optional[str] = ""
+    photo: Optional[str] = None
+    instagram: Optional[str] = ""
+    facebook: Optional[str] = ""
+
+
 class User(BaseModel):
     user_id: str
     email: str
@@ -330,6 +379,98 @@ async def delete_tag(tag_id: str, _user: User = Depends(require_admin)):
 @api_router.get("/")
 async def root():
     return {"service": "paris-cuban-salsa-gallery", "status": "ok"}
+
+
+# ========= Entries (agenda / soirées / workshops / festivals) =========
+
+VALID_TYPES = {"agenda", "soiree", "workshop", "festival"}
+
+
+@api_router.get("/entries", response_model=List[Entry])
+async def list_entries(type: Optional[str] = None):
+    query: dict = {}
+    if type:
+        if type not in VALID_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid type")
+        query["type"] = type
+    items = await db.entries.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
+    return [Entry(**e) for e in items]
+
+
+@api_router.get("/entries/{entry_id}", response_model=Entry)
+async def get_entry(entry_id: str):
+    e = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return Entry(**e)
+
+
+@api_router.post("/entries", response_model=Entry)
+async def create_entry(payload: EntryCreate, _user: User = Depends(require_admin)):
+    if payload.type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid type")
+    entry = Entry(**payload.dict())
+    await db.entries.insert_one(entry.dict())
+    return entry
+
+
+@api_router.put("/entries/{entry_id}", response_model=Entry)
+async def update_entry(entry_id: str, payload: EntryCreate, _user: User = Depends(require_admin)):
+    if payload.type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid type")
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    update = payload.dict()
+    await db.entries.update_one({"id": entry_id}, {"$set": update})
+    merged = {**existing, **update, "id": entry_id}
+    return Entry(**merged)
+
+
+@api_router.delete("/entries/{entry_id}")
+async def delete_entry(entry_id: str, _user: User = Depends(require_admin)):
+    await db.entries.delete_one({"id": entry_id})
+    return {"ok": True}
+
+
+# ========= Teachers =========
+
+@api_router.get("/teachers", response_model=List[Teacher])
+async def list_teachers():
+    items = await db.teachers.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return [Teacher(**t) for t in items]
+
+
+@api_router.get("/teachers/{teacher_id}", response_model=Teacher)
+async def get_teacher(teacher_id: str):
+    t = await db.teachers.find_one({"id": teacher_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    return Teacher(**t)
+
+
+@api_router.post("/teachers", response_model=Teacher)
+async def create_teacher(payload: TeacherCreate, _user: User = Depends(require_admin)):
+    teacher = Teacher(**payload.dict())
+    await db.teachers.insert_one(teacher.dict())
+    return teacher
+
+
+@api_router.put("/teachers/{teacher_id}", response_model=Teacher)
+async def update_teacher(teacher_id: str, payload: TeacherCreate, _user: User = Depends(require_admin)):
+    existing = await db.teachers.find_one({"id": teacher_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    update = payload.dict()
+    await db.teachers.update_one({"id": teacher_id}, {"$set": update})
+    merged = {**existing, **update, "id": teacher_id}
+    return Teacher(**merged)
+
+
+@api_router.delete("/teachers/{teacher_id}")
+async def delete_teacher(teacher_id: str, _user: User = Depends(require_admin)):
+    await db.teachers.delete_one({"id": teacher_id})
+    return {"ok": True}
 
 
 app.include_router(api_router)

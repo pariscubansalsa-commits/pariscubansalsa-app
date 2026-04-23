@@ -1,0 +1,118 @@
+import React from "react";
+import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { Platform, View, StyleSheet } from "react-native";
+import { COLORS, FONTS } from "../../src/theme";
+
+export default function TabsLayout() {
+  return (
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: COLORS.primaryText,
+        tabBarInactiveTintColor: COLORS.secondaryText,
+        tabBarStyle: styles.bar,
+        tabBarItemStyle: styles.item,
+        tabBarLabelStyle: {
+          fontFamily: FONTS.bodyBold,
+          fontSize: 10,
+          letterSpacing: 0.8,
+          textTransform: "uppercase",
+        },
+        tabBarActiveBackgroundColor: "transparent",
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Accueil",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="home-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="soirees"
+        options={{
+          title: "Soirées",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="musical-notes-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="workshops"
+        options={{
+          title: "Workshops",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="barbell-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="festivals"
+        options={{
+          title: "Festivals",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="calendar-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profs"
+        options={{
+          title: "Profs",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="people-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="galerie"
+        options={{
+          title: "Galerie",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="images-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+    </Tabs>
+  );
+}
+
+function TabIcon({
+  name,
+  color,
+  focused,
+}: {
+  name: any;
+  color: string;
+  focused: boolean;
+}) {
+  return (
+    <View style={styles.iconWrap}>
+      <Ionicons name={name} size={20} color={color} />
+      {focused && <View style={styles.activeDot} />}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: {
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.primaryText,
+    height: Platform.OS === "ios" ? 82 : 64,
+    paddingTop: 6,
+    paddingBottom: Platform.OS === "ios" ? 22 : 8,
+  },
+  item: { paddingVertical: 2 },
+  iconWrap: { alignItems: "center", justifyContent: "center" },
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.accentYellow,
+    marginTop: 3,
+  },
+});
