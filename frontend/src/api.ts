@@ -126,6 +126,38 @@ export const api = {
     fetch(`${API}/entries?featured=true`).then((r) => handle<EntryItem[]>(r)),
   listCalendar: () =>
     fetch(`${API}/calendar/events`).then((r) => handle<EntryItem[]>(r)),
+
+  submitEntry: (body: {
+    type: "soiree" | "workshop";
+    title: string;
+    date: string;
+    time?: string;
+    venue?: string;
+    address?: string;
+    description?: string;
+    instructor?: string;
+    ticket_link?: string;
+    submitter_name: string;
+    submitter_email: string;
+  }) =>
+    fetch(`${API}/entries/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => handle<EntryItem>(r)),
+
+  listPendingEntries: (token: string) =>
+    fetch(`${API}/entries?status=pending`, {
+      credentials: "include",
+      headers: authHeaders(token),
+    }).then((r) => handle<EntryItem[]>(r)),
+
+  approveEntry: (token: string, id: string) =>
+    fetch(`${API}/entries/${id}/approve`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem>(r)),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>

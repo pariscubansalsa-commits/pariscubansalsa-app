@@ -22,11 +22,12 @@ import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
 
-const TYPES: { key: EntryType; label: string }[] = [
+const TYPES: { key: EntryType | "pending"; label: string }[] = [
   { key: "agenda", label: "Agenda" },
   { key: "soiree", label: "Soirées" },
   { key: "workshop", label: "Workshops" },
   { key: "festival", label: "Festivals" },
+  { key: "pending", label: "À valider" },
 ];
 
 const EMPTY = {
@@ -46,7 +47,7 @@ const EMPTY = {
 export default function AdminEntries() {
   const { user, loading, token } = useAuth();
   const router = useRouter();
-  const [filter, setFilter] = useState<EntryType>("agenda");
+  const [filter, setFilter] = useState<EntryType | "pending">("agenda");
   const [items, setItems] = useState<EntryItem[]>([]);
   const [busy, setBusy] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -61,12 +62,17 @@ export default function AdminEntries() {
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      const data = await api.listEntries(filter);
-      setItems(data);
+      if (filter === "pending") {
+        const data = token ? await api.listPendingEntries(token) : [];
+        setItems(data);
+      } else {
+        const data = await api.listEntries(filter);
+        setItems(data);
+      }
     } finally {
       setBusy(false);
     }
-  }, [filter]);
+  }, [filter, token]);
 
   useEffect(() => {
     if (user?.is_admin) load();
@@ -121,7 +127,7 @@ export default function AdminEntries() {
     }
     setSubmitting(true);
     try {
-      const body = { type: filter, ...form };
+      const body = { type: filter === "pending" ? "soiree" : filter, ...form };
       if (editing) await api.updateEntry(token, editing.id, body);
       else await api.createEntry(token, body);
       setModalOpen(false);
@@ -149,8 +155,15 @@ export default function AdminEntries() {
     setItems((prev) => prev.filter((x) => x.id !== id));
   };
 
+  const handleApprove = async (id: string) => {
+    if (!token) return;
+    await api.approveEntry(token, id);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
   const isWorkshop = filter === "workshop";
   const isFestival = filter === "festival";
+  const isPending = filter === "pending";
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -183,7 +196,11 @@ export default function AdminEntries() {
         ))}
       </ScrollView>
 
-      <TouchableOpacity testID="create-entry-btn" style={styles.addBtn} onPress={openCreate}>
+      <TouchableOpacity
+        testID="create-entry-btn"
+        style={[styles.addBtn, isPending && { display: "none" }]}
+        onPress={openCreate}
+      >
         <Ionicons name="add" size={18} color={COLORS.primaryText} />
         <Text style={styles.addTxt}>AJOUTER UNE ENTRÉE</Text>
       </TouchableOpacity>
@@ -195,16 +212,37 @@ export default function AdminEntries() {
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
           {items.length === 0 && (
-            <Text style={styles.emptyTxt}>Aucune entrée pour ce type.</Text>
+            <Text style={styles.emptyTxt}>
+              {isPending ? "Aucune proposition en attente." : "Aucune entrée pour ce type."}
+            </Text>
           )}
           {items.map((e) => (
-            <EntryCard
-              key={e.id}
-              entry={e}
-              isAdmin
-              onAdminEdit={() => openEdit(e)}
-              onAdminDelete={() => handleDelete(e.id)}
-            />
+            <View key={e.id} style={{ marginBottom: 14 }}>
+              {isPending && (
+                <View style={styles.pendingMeta}>
+                  <Ionicons name="time-outline" size={12} color={COLORS.primaryText} />
+                  <Text style={styles.pendingMetaTxt}>
+                    Proposé par {e.submitter_name || "?"} · {e.submitter_email || ""}
+                  </Text>
+                </View>
+              )}
+              <EntryCard
+                entry={e}
+                isAdmin
+                onAdminEdit={isPending ? undefined : () => openEdit(e)}
+                onAdminDelete={() => handleDelete(e.id)}
+              />
+              {isPending && (
+                <TouchableOpacity
+                  testID={`approve-${e.id}`}
+                  style={styles.approveBtn}
+                  onPress={() => handleApprove(e.id)}
+                >
+                  <Ionicons name="checkmark-circle" size={16} color={COLORS.primaryText} />
+                  <Text style={styles.approveTxt}>VALIDER & PUBLIER</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ))}
         </ScrollView>
       )}
@@ -495,6 +533,38 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   switchDotOn: { alignSelf: "flex-end" },
+  pendingMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFBEA",
+    borderWidth: 1,
+    borderColor: COLORS.accentYellow,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 6,
+  },
+  pendingMetaTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    color: COLORS.primaryText,
+  },
+  approveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: COLORS.accentYellow,
+    paddingVertical: 14,
+    borderRadius: 40,
+    marginTop: -8,
+  },
+  approveTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    color: COLORS.primaryText,
+  },
   primaryBtnTxt: {
     fontFamily: FONTS.bodyBold,
     fontSize: 12,

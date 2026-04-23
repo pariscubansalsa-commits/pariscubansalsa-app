@@ -23,8 +23,9 @@ type Props = {
   headline: React.ReactNode;
   subtitle: string;
   showFeatured?: boolean;
-  useCalendar?: boolean; // pull entries from Google Calendar iCal feed
+  useCalendar?: boolean;
   handleAuthCallback?: boolean;
+  headerExtra?: React.ReactNode;
 };
 
 export default function EntriesScreen({
@@ -35,6 +36,7 @@ export default function EntriesScreen({
   showFeatured = false,
   useCalendar = false,
   handleAuthCallback = false,
+  headerExtra,
 }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<EntryItem[]>([]);
@@ -92,6 +94,7 @@ export default function EntriesScreen({
                   {items.length} {items.length <= 1 ? "ENTRÉE" : "ENTRÉES"}
                 </Text>
               </View>
+              {headerExtra ? <View style={{ marginTop: 18 }}>{headerExtra}</View> : null}
             </View>
           </>
         }

@@ -82,16 +82,19 @@ class Entry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str  # 'agenda' | 'soiree' | 'workshop' | 'festival'
     title: str
-    date: str  # ISO start date
-    end_date: Optional[str] = None  # for festivals
-    time: Optional[str] = ""  # "20:30" or "14:00 - 17:00"
+    date: str
+    end_date: Optional[str] = None
+    time: Optional[str] = ""
     venue: Optional[str] = ""
     address: Optional[str] = ""
     description: Optional[str] = ""
-    instructor: Optional[str] = ""  # for workshops
+    instructor: Optional[str] = ""
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
-    featured: bool = False  # highlighted partner / coup de cœur
+    featured: bool = False
+    status: str = "approved"  # 'pending' | 'approved'
+    submitter_name: Optional[str] = ""
+    submitter_email: Optional[str] = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -108,6 +111,20 @@ class EntryCreate(BaseModel):
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
     featured: bool = False
+
+
+class EntrySubmit(BaseModel):
+    type: str  # must be 'soiree' or 'workshop'
+    title: str
+    date: str
+    time: Optional[str] = ""
+    venue: Optional[str] = ""
+    address: Optional[str] = ""
+    description: Optional[str] = ""
+    instructor: Optional[str] = ""
+    ticket_link: Optional[str] = ""
+    submitter_name: str
+    submitter_email: str
 
 
 class Teacher(BaseModel):
@@ -391,7 +408,12 @@ VALID_TYPES = {"agenda", "soiree", "workshop", "festival"}
 
 
 @api_router.get("/entries", response_model=List[Entry])
-async def list_entries(type: Optional[str] = None, featured: Optional[bool] = None):
+async def list_entries(
+    request: Request,
+    type: Optional[str] = None,
+    featured: Optional[bool] = None,
+    status: Optional[str] = None,
+):
     query: dict = {}
     if type:
         if type not in VALID_TYPES:
@@ -399,8 +421,42 @@ async def list_entries(type: Optional[str] = None, featured: Optional[bool] = No
         query["type"] = type
     if featured is not None:
         query["featured"] = featured
+    if status:
+        user = await get_current_user(request)
+        if not user or not user.is_admin:
+            raise HTTPException(status_code=401, detail="Admin only")
+        query["status"] = status
+    else:
+        query["$or"] = [{"status": "approved"}, {"status": {"$exists": False}}]
     items = await db.entries.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
     return [Entry(**e) for e in items]
+
+
+@api_router.post("/entries/submit", response_model=Entry)
+async def submit_entry(payload: EntrySubmit):
+    """Public endpoint: teachers/organizers submit an event for admin review."""
+    if payload.type not in {"soiree", "workshop"}:
+        raise HTTPException(status_code=400, detail="Seuls soirées et workshops sont acceptés")
+    if not payload.submitter_name.strip() or not payload.submitter_email.strip():
+        raise HTTPException(status_code=400, detail="Nom et email requis")
+    data = payload.dict()
+    data["status"] = "pending"
+    data["featured"] = False
+    data["cover_photo"] = None
+    data["end_date"] = None
+    entry = Entry(**data)
+    await db.entries.insert_one(entry.dict())
+    return entry
+
+
+@api_router.post("/entries/{entry_id}/approve", response_model=Entry)
+async def approve_entry(entry_id: str, _user: User = Depends(require_admin)):
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.entries.update_one({"id": entry_id}, {"$set": {"status": "approved"}})
+    existing["status"] = "approved"
+    return Entry(**existing)
 
 
 @api_router.get("/entries/{entry_id}", response_model=Entry)

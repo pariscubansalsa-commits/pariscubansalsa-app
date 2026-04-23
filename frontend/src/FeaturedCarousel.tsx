@@ -10,6 +10,7 @@ import {
   Platform,
   Linking,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, EntryItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
@@ -29,6 +30,7 @@ async function openLink(url: string) {
 }
 
 export default function FeaturedCarousel() {
+  const router = useRouter();
   const [items, setItems] = useState<EntryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -69,7 +71,7 @@ export default function FeaturedCarousel() {
               testID={`featured-${idx}`}
               style={[styles.card, { width: CARD_W, height: CARD_H }]}
               activeOpacity={0.9}
-              onPress={() => item.ticket_link && openLink(item.ticket_link)}
+              onPress={() => router.push(`/entry/${item.id}` as any)}
             >
               {item.cover_photo ? (
                 <Image source={{ uri: item.cover_photo }} style={styles.img} />
