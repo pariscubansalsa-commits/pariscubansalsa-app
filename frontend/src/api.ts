@@ -124,6 +124,8 @@ export const api = {
     ),
   listFeatured: () =>
     fetch(`${API}/entries?featured=true`).then((r) => handle<EntryItem[]>(r)),
+  listCalendar: () =>
+    fetch(`${API}/calendar/events`).then((r) => handle<EntryItem[]>(r)),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>

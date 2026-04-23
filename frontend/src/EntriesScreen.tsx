@@ -22,6 +22,7 @@ type Props = {
   headline: React.ReactNode;
   subtitle: string;
   showFeatured?: boolean;
+  useCalendar?: boolean; // pull entries from Google Calendar iCal feed
   handleAuthCallback?: boolean;
 };
 
@@ -31,6 +32,7 @@ export default function EntriesScreen({
   headline,
   subtitle,
   showFeatured = false,
+  useCalendar = false,
   handleAuthCallback = false,
 }: Props) {
   const [items, setItems] = useState<EntryItem[]>([]);
@@ -45,7 +47,9 @@ export default function EntriesScreen({
 
   const load = useCallback(async () => {
     try {
-      const data = await api.listEntries(type);
+      const data = useCalendar
+        ? await api.listCalendar()
+        : await api.listEntries(type);
       setItems(data);
     } catch (e) {
       console.log("entries err", e);
@@ -53,7 +57,7 @@ export default function EntriesScreen({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [type]);
+  }, [type, useCalendar]);
 
   useEffect(() => {
     if (!isAuthCallback) load();

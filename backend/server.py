@@ -6,10 +6,12 @@ import os
 import logging
 import uuid
 import requests
+import re
+from icalendar import Calendar
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 
 
 ROOT_DIR = Path(__file__).parent
@@ -475,6 +477,132 @@ async def update_teacher(teacher_id: str, payload: TeacherCreate, _user: User = 
 async def delete_teacher(teacher_id: str, _user: User = Depends(require_admin)):
     await db.teachers.delete_one({"id": teacher_id})
     return {"ok": True}
+
+
+# ========= Google Calendar iCal feed =========
+
+DEFAULT_ICAL_URL = (
+    "https://calendar.google.com/calendar/ical/"
+    "18f1fd2cff2d67fce177c8dacaeb77df976c4906c5ee4661365bd38d6d216d33"
+    "%40group.calendar.google.com/public/basic.ics"
+)
+ICAL_URL = os.environ.get("GOOGLE_CALENDAR_ICAL_URL", DEFAULT_ICAL_URL)
+_ical_cache: dict = {"at": None, "data": []}
+ICAL_CACHE_TTL = timedelta(minutes=10)
+
+
+def _html_strip(text: str) -> str:
+    # Google Calendar descriptions may contain basic HTML tags + entities
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_url(text: str) -> str:
+    if not text:
+        return ""
+    m = re.search(r"https?://[^\s<>\"]+", text)
+    return m.group(0) if m else ""
+
+
+def _to_iso_date(value) -> str:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date_type):
+        return value.isoformat()
+    return str(value)
+
+
+def _to_time_str(start, end) -> str:
+    def fmt(v):
+        if isinstance(v, datetime):
+            return v.strftime("%H:%M")
+        return ""
+    s = fmt(start)
+    e = fmt(end)
+    if s and e and s != "00:00":
+        return f"{s} - {e}"
+    if s and s != "00:00":
+        return s
+    return ""
+
+
+def fetch_calendar_entries() -> List[dict]:
+    now = datetime.now(timezone.utc)
+    if _ical_cache["at"] and now - _ical_cache["at"] < ICAL_CACHE_TTL:
+        return _ical_cache["data"]
+
+    try:
+        r = requests.get(ICAL_URL, timeout=10)
+        r.raise_for_status()
+    except Exception as e:
+        logging.error("ical fetch failed: %s", e)
+        # Return stale cache if any, else empty
+        return _ical_cache.get("data") or []
+
+    try:
+        cal = Calendar.from_ical(r.content)
+    except Exception as e:
+        logging.error("ical parse failed: %s", e)
+        return _ical_cache.get("data") or []
+
+    items: List[dict] = []
+    cutoff = (now - timedelta(days=1)).date()
+    for component in cal.walk():
+        if component.name != "VEVENT":
+            continue
+        try:
+            dtstart = component.get("dtstart").dt
+            dtend_prop = component.get("dtend")
+            dtend = dtend_prop.dt if dtend_prop else dtstart
+            summary = str(component.get("summary") or "").strip()
+            raw_desc = str(component.get("description") or "")
+            desc_clean = _html_strip(raw_desc)
+            location = str(component.get("location") or "").strip()
+            uid = str(component.get("uid") or uuid.uuid4())
+
+            start_date = dtstart.date() if isinstance(dtstart, datetime) else dtstart
+            if start_date < cutoff:
+                continue
+
+            # Venue vs address: take first line as venue, rest as address
+            venue = ""
+            address = location
+            if "," in location:
+                parts = [p.strip() for p in location.split(",", 1)]
+                venue, address = parts[0], parts[1]
+
+            items.append({
+                "id": uid,
+                "type": "agenda",
+                "title": summary or "Événement",
+                "date": _to_iso_date(dtstart),
+                "end_date": _to_iso_date(dtend) if dtend and dtend != dtstart else None,
+                "time": _to_time_str(dtstart, dtend),
+                "venue": venue,
+                "address": address,
+                "description": desc_clean,
+                "instructor": "",
+                "ticket_link": _extract_url(raw_desc),
+                "cover_photo": None,
+                "featured": False,
+                "created_at": now.isoformat(),
+            })
+        except Exception as e:
+            logging.warning("skip event: %s", e)
+            continue
+
+    items.sort(key=lambda x: x["date"])
+    _ical_cache["at"] = now
+    _ical_cache["data"] = items
+    return items
+
+
+@api_router.get("/calendar/events")
+async def calendar_events():
+    return fetch_calendar_entries()
 
 
 app.include_router(api_router)

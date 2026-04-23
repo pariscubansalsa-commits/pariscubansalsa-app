@@ -8,6 +8,7 @@ export default function Index() {
     <EntriesScreen
       overline="SORTIES DU MOMENT"
       showFeatured
+      useCalendar
       headline={
         <>
           Le mois{" "}
@@ -22,7 +23,7 @@ export default function Index() {
           </Text>
         </>
       }
-      subtitle="L'agenda vivant de Paris Cuban Salsa. Soirées, workshops, festivals — tout ce qui bouge cette semaine et les suivantes."
+      subtitle="L'agenda vivant synchronisé depuis notre Google Calendar. Soirées, workshops, festivals — actualisé toutes les 10 minutes."
       handleAuthCallback
     />
   );
