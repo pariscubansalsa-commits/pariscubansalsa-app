@@ -9,13 +9,13 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: COLORS.primaryText,
-        tabBarInactiveTintColor: COLORS.secondaryText,
+        tabBarActiveTintColor: COLORS.accentYellow,
+        tabBarInactiveTintColor: "rgba(255,255,255,0.55)",
         tabBarStyle: styles.bar,
         tabBarItemStyle: styles.item,
         tabBarLabelStyle: {
           fontFamily: FONTS.bodyBold,
-          fontSize: 10,
+          fontSize: 9,
           letterSpacing: 0.8,
           textTransform: "uppercase",
         },
@@ -99,12 +99,12 @@ function TabIcon({
 
 const styles = StyleSheet.create({
   bar: {
-    backgroundColor: COLORS.background,
+    backgroundColor: "#1A1A1A",
     borderTopWidth: 1,
-    borderTopColor: COLORS.primaryText,
-    height: Platform.OS === "ios" ? 82 : 64,
-    paddingTop: 6,
-    paddingBottom: Platform.OS === "ios" ? 22 : 8,
+    borderTopColor: "rgba(255,255,255,0.08)",
+    height: Platform.OS === "ios" ? 84 : 68,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === "ios" ? 22 : 10,
   },
   item: { paddingVertical: 2 },
   iconWrap: { alignItems: "center", justifyContent: "center" },

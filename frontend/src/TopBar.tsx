@@ -5,94 +5,140 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
+  Image,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Logo } from "./Logo";
 import { useAuth } from "./auth";
 import { COLORS, FONTS, SPACING } from "./theme";
 
-export default function TopBar({ subtitle }: { subtitle?: string }) {
+async function openLink(url: string) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.open(url, "_blank");
+    return;
+  }
+  const can = await Linking.canOpenURL(url);
+  if (can) Linking.openURL(url);
+}
+
+export default function TopBar() {
   const router = useRouter();
   const { user } = useAuth();
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safe}>
       <View style={styles.bar}>
-        <Logo size={14} />
+        <TouchableOpacity
+          onPress={() => router.replace("/")}
+          style={styles.logoWrap}
+          activeOpacity={0.8}
+        >
+          <View style={styles.logoMark}>
+            <Image
+              source={require("../assets/images/pcs-logo.png")}
+              style={styles.logoImg}
+              resizeMode="contain"
+            />
+          </View>
+          <View style={styles.logoText}>
+            <Text style={styles.logoRow1}>Paris Cuban</Text>
+            <Text style={styles.logoRow2}>Salsa</Text>
+          </View>
+        </TouchableOpacity>
+
         <View style={styles.right}>
           {user?.is_admin ? (
             <TouchableOpacity
               testID="admin-dashboard-link"
               onPress={() => router.push("/admin")}
-              style={styles.btn}
+              style={styles.iconBtn}
             >
-              <Ionicons name="settings-outline" size={14} color={COLORS.primaryText} />
-              <Text style={styles.btnTxt}>ADMIN</Text>
+              <Ionicons name="settings-outline" size={16} color={COLORS.accentYellow} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               testID="admin-login-link"
               onPress={() => router.push("/login")}
-              style={styles.loginBtn}
+              style={styles.iconBtn}
             >
-              <Text style={styles.btnTxt}>CONNEXION</Text>
+              <Ionicons name="lock-closed-outline" size={15} color={COLORS.accentYellow} />
             </TouchableOpacity>
           )}
+          <TouchableOpacity
+            testID="instagram-link"
+            onPress={() => openLink("https://instagram.com/pariscubansalsa")}
+            style={styles.instaBtn}
+          >
+            <Ionicons name="logo-instagram" size={14} color={COLORS.accentYellow} />
+            <Text style={styles.instaTxt}>@pariscubansalsa</Text>
+          </TouchableOpacity>
         </View>
       </View>
-      {subtitle ? (
-        <View style={styles.subRow}>
-          <Text style={styles.subtitle}>{subtitle}</Text>
-        </View>
-      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    backgroundColor: COLORS.background,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
+  safe: { backgroundColor: "#111" },
   bar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: SPACING.screen,
-    paddingVertical: 12,
+    height: 56,
+  },
+  logoWrap: { flexDirection: "row", alignItems: "center", gap: 10 },
+  logoMark: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  logoImg: { width: "88%", height: "88%" },
+  logoText: { justifyContent: "center" },
+  logoRow1: {
+    fontFamily: FONTS.heading,
+    fontSize: 13,
+    color: "#fff",
+    lineHeight: 14,
+  },
+  logoRow2: {
+    fontFamily: FONTS.headingItalic,
+    fontStyle: "italic",
+    fontSize: 13,
+    color: COLORS.accentYellow,
+    lineHeight: 14,
   },
   right: { flexDirection: "row", alignItems: "center", gap: 8 },
-  btn: {
+  iconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(245,197,24,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(245,197,24,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  instaBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 40,
     borderWidth: 1,
-    borderColor: COLORS.primaryText,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: "rgba(245,197,24,0.3)",
   },
-  loginBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.primaryText,
-  },
-  btnTxt: {
-    fontFamily: FONTS.bodyBold,
-    fontSize: 10,
-    letterSpacing: 1.4,
-    color: COLORS.primaryText,
-  },
-  subRow: {
-    paddingHorizontal: SPACING.screen,
-    paddingBottom: 10,
-  },
-  subtitle: {
-    fontFamily: FONTS.body,
-    fontSize: 12,
-    color: COLORS.secondaryText,
+  instaTxt: {
+    fontFamily: FONTS.bodySemi,
+    fontSize: 11,
+    color: COLORS.accentYellow,
+    letterSpacing: 0.3,
   },
 });
