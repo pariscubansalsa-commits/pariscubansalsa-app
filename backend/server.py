@@ -89,6 +89,7 @@ class Entry(BaseModel):
     instructor: Optional[str] = ""  # for workshops
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
+    featured: bool = False  # highlighted partner / coup de cœur
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -104,6 +105,7 @@ class EntryCreate(BaseModel):
     instructor: Optional[str] = ""
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
+    featured: bool = False
 
 
 class Teacher(BaseModel):
@@ -387,12 +389,14 @@ VALID_TYPES = {"agenda", "soiree", "workshop", "festival"}
 
 
 @api_router.get("/entries", response_model=List[Entry])
-async def list_entries(type: Optional[str] = None):
+async def list_entries(type: Optional[str] = None, featured: Optional[bool] = None):
     query: dict = {}
     if type:
         if type not in VALID_TYPES:
             raise HTTPException(status_code=400, detail="Invalid type")
         query["type"] = type
+    if featured is not None:
+        query["featured"] = featured
     items = await db.entries.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
     return [Entry(**e) for e in items]
 

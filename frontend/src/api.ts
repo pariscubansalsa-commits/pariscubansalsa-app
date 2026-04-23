@@ -46,6 +46,7 @@ export type EntryItem = {
   instructor?: string;
   ticket_link?: string;
   cover_photo?: string | null;
+  featured?: boolean;
   created_at?: string;
 };
 
@@ -121,6 +122,8 @@ export const api = {
     fetch(`${API}/entries${type ? `?type=${type}` : ""}`).then((r) =>
       handle<EntryItem[]>(r)
     ),
+  listFeatured: () =>
+    fetch(`${API}/entries?featured=true`).then((r) => handle<EntryItem[]>(r)),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>
