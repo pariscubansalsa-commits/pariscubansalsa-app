@@ -1,9 +1,9 @@
 import React from "react";
-import { Text, StyleSheet, View } from "react-native";
+import { Text, StyleSheet, View, Image } from "react-native";
 import { COLORS, FONTS } from "./theme";
 
 export function Logo({ size = 15 }: { size?: number }) {
-  const badgeSize = size * 2.2;
+  const badgeSize = size * 2.6;
   return (
     <View style={styles.row}>
       <View
@@ -16,7 +16,11 @@ export function Logo({ size = 15 }: { size?: number }) {
           },
         ]}
       >
-        <Text style={[styles.badgeTxt, { fontSize: size * 0.72 }]}>PCS</Text>
+        <Image
+          source={require("../assets/images/pcs-logo.png")}
+          style={styles.badgeImg}
+          resizeMode="contain"
+        />
       </View>
       <View style={styles.textWrap}>
         <Text style={[styles.word, { fontSize: size }]}>Paris Cuban </Text>
@@ -37,14 +41,16 @@ export function Logo({ size = 15 }: { size?: number }) {
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
   badge: {
-    backgroundColor: COLORS.primaryText,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: COLORS.primaryText,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
-  badgeTxt: {
-    color: COLORS.accentYellow,
-    fontFamily: FONTS.bodyBold,
-    letterSpacing: 1,
+  badgeImg: {
+    width: "85%",
+    height: "85%",
   },
   textWrap: { flexDirection: "row", alignItems: "baseline" },
   word: {
