@@ -21,7 +21,25 @@ import { api, TeacherItem } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 
-const EMPTY = { name: "", bio: "", photo: null as string | null, instagram: "", facebook: "" };
+const EMPTY = {
+  name: "",
+  bio: "",
+  photo: null as string | null,
+  instagram: "",
+  facebook: "",
+  dance_styles: [] as string[],
+  trusted_teacher: false,
+};
+
+const STYLE_OPTIONS = [
+  "Salsa cubaine",
+  "Afro-cubain",
+  "Rumba",
+  "Son cubano",
+  "Rueda de casino",
+  "Reggaeton",
+  "Bachata",
+];
 
 export default function AdminTeachers() {
   const { user, loading, token } = useAuth();
@@ -65,8 +83,22 @@ export default function AdminTeachers() {
       photo: t.photo || null,
       instagram: t.instagram || "",
       facebook: t.facebook || "",
+      dance_styles: t.dance_styles || [],
+      trusted_teacher: !!t.trusted_teacher,
     });
     setModalOpen(true);
+  };
+
+  const toggleStyle = (style: string) => {
+    setForm((prev) => {
+      const exists = prev.dance_styles.includes(style);
+      return {
+        ...prev,
+        dance_styles: exists
+          ? prev.dance_styles.filter((s) => s !== style)
+          : [...prev.dance_styles, style],
+      };
+    });
   };
 
   const pickPhoto = async () => {
@@ -242,6 +274,56 @@ export default function AdminTeachers() {
                 placeholderTextColor={COLORS.secondaryText}
               />
 
+              <Text style={styles.label}>STYLES DE DANSE</Text>
+              <View style={styles.chipRow}>
+                {STYLE_OPTIONS.map((s) => {
+                  const active = form.dance_styles.includes(s);
+                  return (
+                    <TouchableOpacity
+                      key={s}
+                      testID={`style-${s}`}
+                      onPress={() => toggleStyle(s)}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text
+                        style={[styles.chipTxt, active && styles.chipTxtActive]}
+                      >
+                        {s}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TouchableOpacity
+                testID="teacher-trusted-toggle"
+                style={[styles.trustRow, form.trusted_teacher && styles.trustRowOn]}
+                onPress={() =>
+                  setForm({ ...form, trusted_teacher: !form.trusted_teacher })
+                }
+              >
+                <View style={styles.trustLeft}>
+                  <Ionicons
+                    name={form.trusted_teacher ? "shield-checkmark" : "shield-outline"}
+                    size={18}
+                    color={
+                      form.trusted_teacher ? COLORS.primaryText : COLORS.secondaryText
+                    }
+                  />
+                  <View>
+                    <Text style={styles.trustTitle}>Prof vérifié</Text>
+                    <Text style={styles.trustSub}>
+                      Les workshops de ce prof sont publiés sans validation manuelle.
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.switch, form.trusted_teacher && styles.switchOn]}>
+                  <View
+                    style={[styles.switchDot, form.trusted_teacher && styles.switchDotOn]}
+                  />
+                </View>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 testID="submit-teacher"
                 style={[styles.primaryBtn, submitting && { opacity: 0.6 }]}
@@ -404,4 +486,79 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     color: COLORS.primaryText,
   },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 4,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 40,
+    backgroundColor: "#fff",
+  },
+  chipActive: {
+    backgroundColor: COLORS.primaryText,
+    borderColor: COLORS.primaryText,
+  },
+  chipTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    color: COLORS.primaryText,
+  },
+  chipTxtActive: { color: COLORS.accentYellow },
+  trustRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+  },
+  trustRowOn: {
+    borderColor: COLORS.accentYellow,
+    backgroundColor: "#FFFBEA",
+  },
+  trustLeft: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    flex: 1,
+  },
+  trustTitle: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 13,
+    color: COLORS.primaryText,
+  },
+  trustSub: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.secondaryText,
+    marginTop: 2,
+    maxWidth: 220,
+  },
+  switch: {
+    width: 38,
+    height: 22,
+    borderRadius: 12,
+    backgroundColor: "#E4E4E7",
+    padding: 2,
+    justifyContent: "center",
+  },
+  switchOn: { backgroundColor: COLORS.accentYellow },
+  switchDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    alignSelf: "flex-start",
+  },
+  switchDotOn: { alignSelf: "flex-end" },
 });

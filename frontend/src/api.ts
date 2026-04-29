@@ -44,9 +44,16 @@ export type EntryItem = {
   address?: string;
   description?: string;
   instructor?: string;
+  teacher_id?: string | null;
+  level?: string;
+  price?: string;
+  category?: string;
   ticket_link?: string;
   cover_photo?: string | null;
   featured?: boolean;
+  status?: "pending" | "approved" | "featured";
+  submitter_name?: string;
+  submitter_email?: string;
   created_at?: string;
 };
 
@@ -57,6 +64,8 @@ export type TeacherItem = {
   photo?: string | null;
   instagram?: string;
   facebook?: string;
+  dance_styles?: string[];
+  trusted_teacher?: boolean;
   created_at?: string;
 };
 
@@ -126,6 +135,24 @@ export const api = {
     fetch(`${API}/entries?featured=true`).then((r) => handle<EntryItem[]>(r)),
   listCalendar: () =>
     fetch(`${API}/calendar/events`).then((r) => handle<EntryItem[]>(r)),
+  listTeacherWorkshops: (teacherId: string) =>
+    fetch(`${API}/teachers/${teacherId}/workshops`).then((r) =>
+      handle<EntryItem[]>(r)
+    ),
+
+  featureEntry: (token: string, id: string) =>
+    fetch(`${API}/entries/${id}/feature`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem>(r)),
+
+  unfeatureEntry: (token: string, id: string) =>
+    fetch(`${API}/entries/${id}/unfeature`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem>(r)),
 
   submitEntry: (body: {
     type: "soiree" | "workshop";
@@ -136,7 +163,12 @@ export const api = {
     address?: string;
     description?: string;
     instructor?: string;
+    teacher_id?: string;
+    level?: string;
+    price?: string;
+    category?: string;
     ticket_link?: string;
+    cover_photo?: string | null;
     submitter_name: string;
     submitter_email: string;
   }) =>
@@ -158,6 +190,13 @@ export const api = {
       headers: authHeaders(token),
       credentials: "include",
     }).then((r) => handle<EntryItem>(r)),
+
+  rejectEntry: (token: string, id: string) =>
+    fetch(`${API}/entries/${id}/reject`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<{ ok: boolean; id: string }>(r)),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>

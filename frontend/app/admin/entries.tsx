@@ -161,6 +161,34 @@ export default function AdminEntries() {
     setItems((prev) => prev.filter((x) => x.id !== id));
   };
 
+  const handleReject = async (id: string) => {
+    if (!token) return;
+    const ok =
+      Platform.OS === "web"
+        ? window.confirm("Refuser cette proposition ? Elle sera supprimée.")
+        : await new Promise<boolean>((r) =>
+            Alert.alert("Refuser ?", "Cette proposition sera supprimée.", [
+              { text: "Annuler", onPress: () => r(false) },
+              { text: "Refuser", style: "destructive", onPress: () => r(true) },
+            ])
+          );
+    if (!ok) return;
+    await api.rejectEntry(token, id);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const handleFeature = async (id: string) => {
+    if (!token) return;
+    await api.featureEntry(token, id);
+    await load();
+  };
+
+  const handleUnfeature = async (id: string) => {
+    if (!token) return;
+    await api.unfeatureEntry(token, id);
+    await load();
+  };
+
   const isWorkshop = filter === "workshop";
   const isFestival = filter === "festival";
   const isPending = filter === "pending";
@@ -223,6 +251,7 @@ export default function AdminEntries() {
                   <Ionicons name="time-outline" size={12} color={COLORS.primaryText} />
                   <Text style={styles.pendingMetaTxt}>
                     Proposé par {e.submitter_name || "?"} · {e.submitter_email || ""}
+                    {e.type ? ` · ${e.type.toUpperCase()}` : ""}
                   </Text>
                 </View>
               )}
@@ -232,15 +261,53 @@ export default function AdminEntries() {
                 onAdminEdit={isPending ? undefined : () => openEdit(e)}
                 onAdminDelete={() => handleDelete(e.id)}
               />
-              {isPending && (
-                <TouchableOpacity
-                  testID={`approve-${e.id}`}
-                  style={styles.approveBtn}
-                  onPress={() => handleApprove(e.id)}
-                >
-                  <Ionicons name="checkmark-circle" size={16} color={COLORS.primaryText} />
-                  <Text style={styles.approveTxt}>VALIDER & PUBLIER</Text>
-                </TouchableOpacity>
+              {isPending ? (
+                <View style={styles.modActions}>
+                  <TouchableOpacity
+                    testID={`approve-${e.id}`}
+                    style={[styles.modBtn, styles.approveBtn]}
+                    onPress={() => handleApprove(e.id)}
+                  >
+                    <Ionicons name="checkmark-circle" size={16} color={COLORS.primaryText} />
+                    <Text style={styles.approveTxt}>VALIDER</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID={`feature-pending-${e.id}`}
+                    style={[styles.modBtn, styles.featureBtn]}
+                    onPress={() => handleFeature(e.id)}
+                  >
+                    <Ionicons name="star" size={16} color={COLORS.accentYellow} />
+                    <Text style={styles.featureTxt}>VALIDER + COUP DE CŒUR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID={`reject-${e.id}`}
+                    style={[styles.modBtn, styles.rejectBtn]}
+                    onPress={() => handleReject(e.id)}
+                  >
+                    <Ionicons name="close-circle" size={16} color={COLORS.primaryText} />
+                    <Text style={styles.rejectTxt}>REFUSER</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                e.status === "featured" ? (
+                  <TouchableOpacity
+                    testID={`unfeature-${e.id}`}
+                    style={[styles.modBtn, styles.unfeatureBtn]}
+                    onPress={() => handleUnfeature(e.id)}
+                  >
+                    <Ionicons name="star-outline" size={16} color={COLORS.primaryText} />
+                    <Text style={styles.featureTxt}>RETIRER DU COUP DE CŒUR</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    testID={`feature-${e.id}`}
+                    style={[styles.modBtn, styles.featureBtn]}
+                    onPress={() => handleFeature(e.id)}
+                  >
+                    <Ionicons name="star" size={16} color={COLORS.accentYellow} />
+                    <Text style={styles.featureTxt}>METTRE EN COUP DE CŒUR</Text>
+                  </TouchableOpacity>
+                )
               )}
             </View>
           ))}
@@ -550,19 +617,55 @@ const styles = StyleSheet.create({
     color: COLORS.primaryText,
   },
   approveBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
     backgroundColor: COLORS.accentYellow,
-    paddingVertical: 14,
-    borderRadius: 40,
-    marginTop: -8,
   },
   approveTxt: {
     fontFamily: FONTS.bodyBold,
-    fontSize: 12,
-    letterSpacing: 1.4,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: COLORS.primaryText,
+  },
+  modActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: -8,
+  },
+  modBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 40,
+    flexGrow: 1,
+    minWidth: 140,
+  },
+  featureBtn: {
+    backgroundColor: "#1A1A1A",
+  },
+  featureTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 1.1,
+    color: COLORS.accentYellow,
+  },
+  unfeatureBtn: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: COLORS.primaryText,
+    marginTop: -6,
+  },
+  rejectBtn: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: COLORS.primaryText,
+  },
+  rejectTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.2,
     color: COLORS.primaryText,
   },
   primaryBtnTxt: {

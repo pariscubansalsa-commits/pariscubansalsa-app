@@ -58,7 +58,7 @@ export default function Profs() {
         }}
         ListHeaderComponent={
           <View style={styles.hero}>
-            <Text style={styles.overline}>ANNUAIRE DES PROFS</Text>
+            <Text style={styles.overline}>PROFS & WORKSHOPS</Text>
             <Text style={styles.title}>
               Les{" "}
               <Text
@@ -70,10 +70,11 @@ export default function Profs() {
               >
                 profs
               </Text>{" "}
-              de la scène parisienne.
+              et leurs workshops à venir.
             </Text>
             <Text style={styles.subtitle}>
               Découvrez les enseignants qui font vivre la salsa cubaine à Paris.
+              Touchez une fiche pour voir leur biographie et leurs prochains workshops.
             </Text>
             <View style={styles.divider} />
           </View>

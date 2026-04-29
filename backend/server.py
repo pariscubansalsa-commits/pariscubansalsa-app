@@ -80,7 +80,7 @@ class PhotosUpload(BaseModel):
 # Generic entry for agenda / soirées / workshops / festivals
 class Entry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    type: str  # 'agenda' | 'soiree' | 'workshop' | 'festival'
+    type: str
     title: str
     date: str
     end_date: Optional[str] = None
@@ -89,10 +89,14 @@ class Entry(BaseModel):
     address: Optional[str] = ""
     description: Optional[str] = ""
     instructor: Optional[str] = ""
+    teacher_id: Optional[str] = None
+    level: Optional[str] = ""  # 'beginner' | 'intermediate' | 'advanced' | ''
+    price: Optional[str] = ""  # free text e.g. "25€" or "Gratuit"
+    category: Optional[str] = ""  # 'salsa' | 'afro-cuban' | 'rumba' | 'son' | 'rueda' | ''
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
-    featured: bool = False
-    status: str = "approved"  # 'pending' | 'approved'
+    featured: bool = False  # legacy: use status='featured' instead
+    status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
     submitter_email: Optional[str] = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -108,13 +112,18 @@ class EntryCreate(BaseModel):
     address: Optional[str] = ""
     description: Optional[str] = ""
     instructor: Optional[str] = ""
+    teacher_id: Optional[str] = None
+    level: Optional[str] = ""
+    price: Optional[str] = ""
+    category: Optional[str] = ""
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
     featured: bool = False
+    status: Optional[str] = None
 
 
 class EntrySubmit(BaseModel):
-    type: str  # must be 'soiree' or 'workshop'
+    type: str
     title: str
     date: str
     time: Optional[str] = ""
@@ -122,7 +131,12 @@ class EntrySubmit(BaseModel):
     address: Optional[str] = ""
     description: Optional[str] = ""
     instructor: Optional[str] = ""
+    teacher_id: Optional[str] = None
+    level: Optional[str] = ""
+    price: Optional[str] = ""
+    category: Optional[str] = ""
     ticket_link: Optional[str] = ""
+    cover_photo: Optional[str] = None
     submitter_name: str
     submitter_email: str
 
@@ -134,6 +148,8 @@ class Teacher(BaseModel):
     photo: Optional[str] = None
     instagram: Optional[str] = ""
     facebook: Optional[str] = ""
+    dance_styles: List[str] = []
+    trusted_teacher: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -143,6 +159,8 @@ class TeacherCreate(BaseModel):
     photo: Optional[str] = None
     instagram: Optional[str] = ""
     facebook: Optional[str] = ""
+    dance_styles: List[str] = []
+    trusted_teacher: bool = False
 
 
 class User(BaseModel):
@@ -413,6 +431,9 @@ async def list_entries(
     type: Optional[str] = None,
     featured: Optional[bool] = None,
     status: Optional[str] = None,
+    level: Optional[str] = None,
+    category: Optional[str] = None,
+    teacher_id: Optional[str] = None,
 ):
     query: dict = {}
     if type:
@@ -420,15 +441,37 @@ async def list_entries(
             raise HTTPException(status_code=400, detail="Invalid type")
         query["type"] = type
     if featured is not None:
-        query["featured"] = featured
+        # Legacy: also map to status='featured'
+        if featured:
+            query["status"] = "featured"
+        else:
+            query["status"] = {"$ne": "featured"}
+    if level:
+        query["level"] = level
+    if category:
+        query["category"] = category
+    if teacher_id:
+        query["teacher_id"] = teacher_id
     if status:
         user = await get_current_user(request)
         if not user or not user.is_admin:
             raise HTTPException(status_code=401, detail="Admin only")
-        query["status"] = status
-    else:
-        query["$or"] = [{"status": "approved"}, {"status": {"$exists": False}}]
-    items = await db.entries.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
+        # Override status filter for admin
+        if isinstance(query.get("status"), dict) or "status" in query:
+            query["status"] = status
+        else:
+            query["status"] = status
+    elif "status" not in query:
+        query["status"] = {"$in": ["approved", "featured"]}
+
+    items = await db.entries.find(query, {"_id": 0}).to_list(1000)
+
+    # Sort: featured first, then by date asc
+    def sort_key(e):
+        priority = 0 if e.get("status") == "featured" else 1
+        return (priority, e.get("date") or "")
+    items.sort(key=sort_key)
+
     return [Entry(**e) for e in items]
 
 
@@ -439,10 +482,18 @@ async def submit_entry(payload: EntrySubmit):
         raise HTTPException(status_code=400, detail="Seuls soirées et workshops sont acceptés")
     if not payload.submitter_name.strip() or not payload.submitter_email.strip():
         raise HTTPException(status_code=400, detail="Nom et email requis")
+
     data = payload.dict()
-    data["status"] = "pending"
+
+    # Trusted teacher → auto-approve
+    auto_approved = False
+    if data.get("teacher_id"):
+        teacher = await db.teachers.find_one({"id": data["teacher_id"]}, {"_id": 0})
+        if teacher and teacher.get("trusted_teacher"):
+            auto_approved = True
+
+    data["status"] = "approved" if auto_approved else "pending"
     data["featured"] = False
-    data["cover_photo"] = None
     data["end_date"] = None
     entry = Entry(**data)
     await db.entries.insert_one(entry.dict())
@@ -457,6 +508,59 @@ async def approve_entry(entry_id: str, _user: User = Depends(require_admin)):
     await db.entries.update_one({"id": entry_id}, {"$set": {"status": "approved"}})
     existing["status"] = "approved"
     return Entry(**existing)
+
+
+@api_router.post("/entries/{entry_id}/reject")
+async def reject_entry(entry_id: str, _user: User = Depends(require_admin)):
+    """Reject a pending submission. The entry is removed from the database."""
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.entries.delete_one({"id": entry_id})
+    return {"ok": True, "id": entry_id}
+
+
+@api_router.post("/entries/{entry_id}/feature", response_model=Entry)
+async def feature_entry(entry_id: str, _user: User = Depends(require_admin)):
+    """Promote an entry to 'featured' (highlighted in carousel + top of feed)."""
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.entries.update_one(
+        {"id": entry_id}, {"$set": {"status": "featured", "featured": True}}
+    )
+    existing["status"] = "featured"
+    existing["featured"] = True
+    return Entry(**existing)
+
+
+@api_router.post("/entries/{entry_id}/unfeature", response_model=Entry)
+async def unfeature_entry(entry_id: str, _user: User = Depends(require_admin)):
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.entries.update_one(
+        {"id": entry_id}, {"$set": {"status": "approved", "featured": False}}
+    )
+    existing["status"] = "approved"
+    existing["featured"] = False
+    return Entry(**existing)
+
+
+@api_router.get("/teachers/{teacher_id}/workshops", response_model=List[Entry])
+async def teacher_workshops(teacher_id: str):
+    items = await db.entries.find(
+        {
+            "teacher_id": teacher_id,
+            "type": "workshop",
+            "status": {"$in": ["approved", "featured"]},
+        },
+        {"_id": 0},
+    ).to_list(500)
+    items.sort(
+        key=lambda e: (0 if e.get("status") == "featured" else 1, e.get("date") or "")
+    )
+    return [Entry(**e) for e in items]
 
 
 @api_router.get("/entries/{entry_id}", response_model=Entry)
