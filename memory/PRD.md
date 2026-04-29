@@ -51,7 +51,20 @@ share button, this drives recurring visits and organic reach every time a dancer
 finds themselves tagged in a new "edition".
 
 ## Not Yet Implemented (Future)
+- (a) Filter chips on Profs & Workshops page by dance style (Casino, Rumba, Afro, Son, Lady Style, Reggaeton, Folklore)
+- (b) Google Calendar moderation queue: imported iCal events arrive as 'pending' → admin approve/reject
+- (c) Organizer account space (email + password): create account, submit events with cover image, dashboard with submission status
+- (d) Photo gallery extension: short shareable link per event (pcs.photos/<slug>) optimised for Instagram Story share
+- (e) Festivals dedicated page: Europe-wide list with date ranges, city, link
 - Supabase image CDN (currently base64 in MongoDB — fine for small communities)
 - Custom domain routing (pcs.photos) — handled at deployment level
 - Tag removal by the person who added it (currently admin-only)
 - Push/email notifications when someone tags you
+
+## Profs & Workshops Section (Latest)
+- Single merged tab "Profs & Workshops" replaces standalone Workshops feed
+- Teacher entity carries `dance_styles: List[str]` and `trusted_teacher: bool`
+- Teacher detail page renders bio + style chips + social links + workshops (featured first)
+- Public workshop submission form supports `presetTeacherId` to lock teacher binding
+- Trusted teachers' submissions auto-approve (`status="approved"` directly)
+- Admin moderation: pending → approve / reject (delete) / feature / unfeature
