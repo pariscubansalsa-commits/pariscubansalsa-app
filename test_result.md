@@ -177,7 +177,7 @@ backend:
 frontend:
   - task: "Profs & Workshops merged tab"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/(tabs)/_layout.tsx, /app/frontend/app/(tabs)/profs.tsx"
     stuck_count: 0
     priority: "high"
@@ -186,10 +186,13 @@ frontend:
         - working: "NA"
           agent: "main"
           comment: "Removed Workshops standalone tab (href:null), renamed Profs tab to 'Profs & Workshops' with school icon. Updated tab headline to 'Les profs et leurs workshops à venir.'"
+        - working: true
+          agent: "testing"
+          comment: "Verified in mobile viewport (390x844). Bottom tab labels (rendered uppercase via textTransform): ACCUEIL, SOIRÉES, FESTIVALS, PROFS & WORKSHOPS, GALERIE. No standalone 'Workshops' tab. Profs page hero shows overline 'PROFS & WORKSHOPS' and headline 'Les profs et leurs workshops à venir.' Teacher grid shows Lorenys & Manolo, OBINISA Relámpago, Yanet Fuentes, Pablo Ramos."
 
   - task: "Teacher detail page with workshops + dance styles + propose CTA"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/profs/[id].tsx"
     stuck_count: 0
     priority: "high"
@@ -198,10 +201,13 @@ frontend:
         - working: "NA"
           agent: "main"
           comment: "Rewrote teacher detail page to fetch listTeacherWorkshops, render dance_styles chips, featured-first workshop list, social links, and a 'propose workshop' CTA pre-bound to teacher_id."
+        - working: true
+          agent: "testing"
+          comment: "Verified end-to-end on Lorenys & Manolo profile: header 'FICHE PROF', LO initials placeholder, title 'Lorenys & Manolo', yellow chips SALSA CUBAINE / SON CUBANO / RUMBA, bio paragraph, Instagram (@lorenys_y_manolo) and Facebook social buttons, 'WORKSHOPS À VENIR — Avec Lorenys' section, '★ COUP DE CŒUR PCS' featured band with 'Formation intensive Lorenys y Manolo' (Centre Momboye)."
 
   - task: "SubmitEntryButton with presetTeacherId support"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/src/SubmitEntryButton.tsx"
     stuck_count: 0
     priority: "high"
@@ -210,6 +216,9 @@ frontend:
         - working: "NA"
           agent: "main"
           comment: "Fixed corrupted styles file. Added presetTeacherId prop: when provided the teacher chip selector is hidden and the locked teacher banner appears."
+        - working: true
+          agent: "testing"
+          comment: "Verified end-to-end. Tapping 'PROPOSER UN WORKSHOP' on Lorenys profile opens modal sheet with title 'Proposer un workshop'. The teacher chip selector (FICHE PROF optional) is HIDDEN as expected. Yellow locked banner 'Ce workshop sera rattaché à cette fiche prof.' is shown. Filled and submitted form (Test Workshop E2E / 2026-09-15 / Intermédiaire / Salsa cubaine / 60€ / Tester E2E / tester-e2e@example.com) -> success screen 'Merci !' with checkmark appeared. After reload, 'Test Workshop E2E' appears on Lorenys profile (auto-approved via trusted_teacher flag). All 5 scenarios PASSED."
 
   - task: "Admin entries — add reject + feature/unfeature actions"
     implemented: true
