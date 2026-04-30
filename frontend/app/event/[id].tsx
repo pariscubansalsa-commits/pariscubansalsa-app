@@ -24,6 +24,7 @@ import * as Sharing from "expo-sharing";
 import { api, EventItem, PhotoItem } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
+import { useShareMenu } from "../../src/ShareMenu";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const GRID_GAP = 4;
@@ -41,7 +42,13 @@ export default function EventDetail() {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [tagSheetOpen, setTagSheetOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
-  const [shareToast, setShareToast] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const { triggerShare, ShareMenu } = useShareMenu();
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 1800);
+  };
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -69,22 +76,25 @@ export default function EventDetail() {
     return `pcs.photos/event/${id}`;
   }, [id]);
 
-  const handleShareEvent = async () => {
-    try {
-      if (Platform.OS === "web" && (navigator as any)?.share) {
-        await (navigator as any).share({
-          title: event?.name ?? "Paris Cuban Salsa",
-          text: `Photos from ${event?.name}`,
-          url: shareUrl,
-        });
-        return;
-      }
-      await Clipboard.setStringAsync(shareUrl);
-      setShareToast(true);
-      setTimeout(() => setShareToast(false), 1800);
-    } catch (e) {
-      console.log("share err", e);
-    }
+  const handleShareEvent = () => {
+    triggerShare({
+      title: event?.name ?? "Paris Cuban Salsa",
+      text: `Photos de ${event?.name ?? "Paris Cuban Salsa"}`,
+      url: shareUrl,
+    });
+  };
+
+  const handleSharePhoto = () => {
+    if (!activePhoto) return;
+    const photoUrl =
+      Platform.OS === "web" && typeof window !== "undefined"
+        ? `${window.location.origin}/event/${id}#p${activePhoto.id}`
+        : `https://pcs.photos/event/${id}#p${activePhoto.id}`;
+    triggerShare({
+      title: event?.name ?? "Paris Cuban Salsa",
+      text: `Cette photo me concerne — ${event?.name ?? "Paris Cuban Salsa"}`,
+      url: photoUrl,
+    });
   };
 
   const handleDownload = async (photo: PhotoItem) => {
@@ -96,6 +106,7 @@ export default function EventDetail() {
         document.body.appendChild(a);
         a.click();
         a.remove();
+        showToast("PHOTO TÉLÉCHARGÉE");
         return;
       }
       const ext = photo.data.startsWith("data:image/png") ? "png" : "jpg";
@@ -107,9 +118,10 @@ export default function EventDetail() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri);
       }
+      showToast("PHOTO ENREGISTRÉE");
     } catch (e) {
       console.log("download err", e);
-      Alert.alert("Download failed");
+      Alert.alert("Téléchargement échoué");
     }
   };
 
@@ -125,8 +137,10 @@ export default function EventDetail() {
         )
       );
       setTagInput("");
+      showToast("TAG AJOUTÉ ✓");
     } catch (e) {
       console.log("tag err", e);
+      showToast("ERREUR — RÉESSAYEZ");
     }
   };
 
@@ -277,9 +291,9 @@ export default function EventDetail() {
         </View>
       </ScrollView>
 
-      {shareToast && (
-        <View style={styles.toast} testID="share-toast">
-          <Text style={styles.toastTxt}>LINK COPIED</Text>
+      {toastMsg && (
+        <View style={styles.toast} testID="toast">
+          <Text style={styles.toastTxt}>{toastMsg}</Text>
         </View>
       )}
 
@@ -304,6 +318,13 @@ export default function EventDetail() {
                 {(activeIdx ?? 0) + 1} / {photos.length}
               </Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity
+                  testID="lightbox-share"
+                  onPress={handleSharePhoto}
+                  style={styles.lbBtn}
+                >
+                  <Ionicons name="share-social-outline" size={22} color="#fff" />
+                </TouchableOpacity>
                 <TouchableOpacity
                   testID="lightbox-download"
                   onPress={() => handleDownload(activePhoto)}
@@ -400,8 +421,7 @@ export default function EventDetail() {
         transparent
         animationType="slide"
         onRequestClose={() => setTagSheetOpen(false)}
-      >
-        <KeyboardAvoidingView
+      >        <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.sheetBackdrop}
         >
@@ -448,6 +468,8 @@ export default function EventDetail() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ShareMenu />
     </SafeAreaView>
   );
 }

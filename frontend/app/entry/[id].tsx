@@ -13,19 +13,24 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as Clipboard from "expo-clipboard";
 import { api, EntryItem } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { formatDateFR, formatDateRangeFR } from "../../src/EntryCard";
+import { useShareMenu } from "../../src/ShareMenu";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank");
+    window.open(url, "_blank", "noopener,noreferrer");
     return;
   }
   const can = await Linking.canOpenURL(url);
   if (can) Linking.openURL(url);
+}
+
+function buildMapsUrl(venue?: string, address?: string): string {
+  const q = [venue, address].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
 export default function EntryDetail() {
@@ -34,7 +39,7 @@ export default function EntryDetail() {
   const { user } = useAuth();
   const [entry, setEntry] = useState<EntryItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(false);
+  const { triggerShare, ShareMenu } = useShareMenu();
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -55,23 +60,16 @@ export default function EntryDetail() {
   const shareUrl =
     Platform.OS === "web" && typeof window !== "undefined"
       ? `${window.location.origin}/entry/${id}`
-      : `pcs.photos/entry/${id}`;
+      : `https://pcs.photos/entry/${id}`;
 
-  const handleShare = async () => {
-    try {
-      if (Platform.OS === "web" && (navigator as any)?.share) {
-        await (navigator as any).share({
-          title: entry?.title ?? "Paris Cuban Salsa",
-          url: shareUrl,
-        });
-        return;
-      }
-      await Clipboard.setStringAsync(shareUrl);
-      setToast(true);
-      setTimeout(() => setToast(false), 1800);
-    } catch (e) {
-      console.log(e);
-    }
+  const handleShare = () => {
+    triggerShare({
+      title: entry?.title ?? "Paris Cuban Salsa",
+      text: entry?.title
+        ? `${entry.title} — Paris Cuban Salsa`
+        : "Paris Cuban Salsa",
+      url: shareUrl,
+    });
   };
 
   if (loading) {
@@ -161,16 +159,28 @@ export default function EntryDetail() {
               </View>
             )}
             {!!entry.venue && (
-              <View style={styles.metaRow}>
+              <TouchableOpacity
+                testID="open-maps-venue"
+                style={styles.metaRow}
+                onPress={() => openLink(buildMapsUrl(entry.venue, entry.address))}
+                activeOpacity={0.7}
+              >
                 <Ionicons name="business-outline" size={16} color={COLORS.primaryText} />
-                <Text style={styles.metaTxt}>{entry.venue}</Text>
-              </View>
+                <Text style={[styles.metaTxt, styles.metaLink]}>{entry.venue}</Text>
+                <Ionicons name="open-outline" size={14} color={COLORS.secondaryText} />
+              </TouchableOpacity>
             )}
             {!!entry.address && (
-              <View style={styles.metaRow}>
+              <TouchableOpacity
+                testID="open-maps-address"
+                style={styles.metaRow}
+                onPress={() => openLink(buildMapsUrl(entry.venue, entry.address))}
+                activeOpacity={0.7}
+              >
                 <Ionicons name="location-outline" size={16} color={COLORS.primaryText} />
-                <Text style={styles.metaTxt}>{entry.address}</Text>
-              </View>
+                <Text style={[styles.metaTxt, styles.metaLink]}>{entry.address}</Text>
+                <Ionicons name="open-outline" size={14} color={COLORS.secondaryText} />
+              </TouchableOpacity>
             )}
           </View>
 
@@ -212,11 +222,7 @@ export default function EntryDetail() {
         </View>
       </ScrollView>
 
-      {toast && (
-        <View style={styles.toast}>
-          <Text style={styles.toastTxt}>LIEN COPIÉ</Text>
-        </View>
-      )}
+      <ShareMenu />
     </SafeAreaView>
   );
 }
@@ -329,6 +335,7 @@ const styles = StyleSheet.create({
     color: COLORS.primaryText,
     flex: 1,
   },
+  metaLink: { textDecorationLine: "underline" },
   desc: {
     fontFamily: FONTS.body,
     fontSize: 15,
