@@ -495,17 +495,22 @@ async def list_entries(
     # For festivals we use end_date when present (a 3-day festival starting
     # yesterday is still "upcoming" until end_date passes).
     today_str = today_paris_str()
-    if not include_past:
-        # date >= today OR end_date >= today (festivals)
-        query["$or"] = [
-            {"date": {"$gte": today_str}},
-            {"end_date": {"$gte": today_str}},
-        ]
-    elif user_admin:
+    if include_past and user_admin:
         # Admin History tab: show STRICTLY past events
         query["$and"] = [
             {"date": {"$lt": today_str}},
             {"$or": [{"end_date": {"$in": [None, ""]}}, {"end_date": {"$lt": today_str}}]},
+        ]
+    elif user_admin and status:
+        # Admin queries with an explicit status (pending / rejected / etc)
+        # do NOT filter by date — drafts can have empty dates and we must
+        # show them in the moderation queue.
+        pass
+    else:
+        # Public listing: only today/upcoming events
+        query["$or"] = [
+            {"date": {"$gte": today_str}},
+            {"end_date": {"$gte": today_str}},
         ]
 
     items = await db.entries.find(query, {"_id": 0}).to_list(2000)
