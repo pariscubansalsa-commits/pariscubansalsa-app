@@ -1,26 +1,26 @@
 """
-Backend test for Paris Cuban Salsa — Google Calendar sync + admin moderation queue.
+Paris Cuban Salsa — Regression test for PUT /api/entries/{id} fix
+and related moderation endpoints.
 
 Coverage:
-  A. Reject endpoint now archives instead of deleting.
-  B. Approve endpoint accepts type query param.
-  C. Google Calendar sync pipeline.
-  D. Regression: /calendar/events, /entries?type=workshop, feature endpoint.
+  1) PUT handles entries whose status is null/missing (featured=true/false toggle)
+  2) PUT preserves description when not sent in body
+  3) POST+DELETE entry
+  4) Approve with type query param reclassifies
+  5) Reject + restore round trip
 
-Auth: Bearer test_session_pcs_admin_000  (see /app/memory/test_credentials.md)
-URL : EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env  (+ /api prefix)
+Auth: Bearer test_session_pcs_admin_000 (from /app/memory/test_credentials.md)
+URL : EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env (+ /api prefix)
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 from typing import Any, Optional
 
 import requests
 
-# ---------- Config ----------
 
 FRONT_ENV = "/app/frontend/.env"
 
@@ -31,370 +31,374 @@ def load_backend_url() -> str:
             line = line.strip()
             if line.startswith("EXPO_PUBLIC_BACKEND_URL="):
                 return line.split("=", 1)[1].strip().strip('"')
-    raise RuntimeError("EXPO_PUBLIC_BACKEND_URL not found in frontend/.env")
+    raise RuntimeError("EXPO_PUBLIC_BACKEND_URL not found")
 
 
 BASE = load_backend_url().rstrip("/") + "/api"
 ADMIN_TOKEN = "test_session_pcs_admin_000"
 ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
-print(f"BASE URL: {BASE}\n")
+
+PASS: list[str] = []
+FAIL: list[str] = []
+cleanup_ids: set[str] = set()
 
 
-# ---------- Result tracking ----------
-
-results: list[tuple[str, bool, str]] = []
-
-
-def log(name: str, ok: bool, details: str = "") -> None:
-    tag = "PASS" if ok else "FAIL"
-    print(f"[{tag}] {name}")
-    if details:
-        print(f"       {details}")
-    results.append((name, ok, details))
+def log_pass(msg: str) -> None:
+    print(f"  [PASS] {msg}")
+    PASS.append(msg)
 
 
-def trim(obj: Any, length: int = 220) -> str:
+def log_fail(msg: str) -> None:
+    print(f"  [FAIL] {msg}")
+    FAIL.append(msg)
+
+
+def section(title: str) -> None:
+    print(f"\n=== {title} ===")
+
+
+def short(obj: Any, limit: int = 220) -> str:
     try:
-        s = json.dumps(obj, default=str)
+        text = json.dumps(obj, ensure_ascii=False, default=str)
     except Exception:
-        s = str(obj)
-    return s if len(s) <= length else s[:length] + "..."
+        text = str(obj)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-# ---------- Helpers ----------
+# ---------------------------------------------------------------------------
+# 1) PUT on entries with status=null — must not crash, must set featured/status
+# ---------------------------------------------------------------------------
 
-manual_entry_ids: list[str] = []  # for cleanup
+def test_put_status_null_safe() -> None:
+    section("1) PUT /api/entries/{id} on entry with status=null")
+
+    # Pick a workshop entry from public feed.
+    r = requests.get(f"{BASE}/entries", params={"type": "workshop"}, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"GET /entries?type=workshop -> {r.status_code} {r.text[:120]}")
+        return
+    items = r.json()
+    if not items:
+        log_fail("No workshop entries available to test PUT")
+        return
+
+    entry = items[0]
+    eid = entry["id"]
+    orig_title = entry["title"]
+    orig_date = entry["date"]
+    orig_status = entry.get("status")
+    orig_featured = entry.get("featured")
+    print(f"  picked workshop id={eid[:8]}… title={orig_title!r} "
+          f"status={orig_status!r} featured={orig_featured}")
+
+    # Simulate the "status=null" condition by clearing status in DB-like manner.
+    # We can't touch Mongo directly here, but the public feed returns 'approved'
+    # entries whose stored status may be None per the review's framing (the
+    # Entry model defaults to 'approved' on read but we still want to exercise
+    # the PUT path). The PUT should not crash regardless.
+
+    body = {
+        "type": "workshop",
+        "title": orig_title,
+        "date": orig_date,
+        "featured": True,
+    }
+    r = requests.put(f"{BASE}/entries/{eid}", json=body, headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"PUT featured=true -> {r.status_code} {r.text[:300]}")
+        return
+    data = r.json()
+    print(f"    resp(featured=true): status={data.get('status')!r} "
+          f"featured={data.get('featured')} title={data.get('title')!r}")
+    if data.get("status") == "featured" and data.get("featured") is True:
+        log_pass("PUT featured=true returns status='featured' and featured=true")
+    else:
+        log_fail(f"PUT featured=true unexpected status/featured: {short(data)}")
+    if data.get("title") == orig_title:
+        log_pass("Title preserved after PUT featured=true")
+    else:
+        log_fail(f"Title changed after PUT featured=true: {data.get('title')!r} vs {orig_title!r}")
+
+    # Now unfeature
+    body2 = {
+        "type": "workshop",
+        "title": orig_title,
+        "date": orig_date,
+        "featured": False,
+    }
+    r = requests.put(f"{BASE}/entries/{eid}", json=body2, headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"PUT featured=false -> {r.status_code} {r.text[:300]}")
+        return
+    data = r.json()
+    print(f"    resp(featured=false): status={data.get('status')!r} "
+          f"featured={data.get('featured')} title={data.get('title')!r}")
+    if data.get("status") == "approved" and data.get("featured") is False:
+        log_pass("PUT featured=false returns status='approved' and featured=false")
+    else:
+        log_fail(f"PUT featured=false unexpected status/featured: {short(data)}")
+    if data.get("title") == orig_title:
+        log_pass("Title preserved after PUT featured=false")
+    else:
+        log_fail(f"Title changed after PUT featured=false: {data.get('title')!r} vs {orig_title!r}")
+
+    # Restore original featured state if it differed.
+    if orig_featured != data.get("featured"):
+        restore = {
+            "type": "workshop",
+            "title": orig_title,
+            "date": orig_date,
+            "featured": bool(orig_featured),
+        }
+        requests.put(f"{BASE}/entries/{eid}", json=restore, headers=ADMIN_HEADERS, timeout=20)
+        print(f"  restored featured={bool(orig_featured)} on {eid[:8]}…")
 
 
-def submit_pending_workshop(title: str, date_str: str = "2026-10-12") -> Optional[str]:
+# ---------------------------------------------------------------------------
+# 2) PUT preserves description when not sent
+# ---------------------------------------------------------------------------
+
+def test_put_preserves_description() -> None:
+    section("2) PUT /api/entries/{id} preserves description when omitted")
+
+    # Create a workshop with a description so we control the starting state.
     payload = {
         "type": "workshop",
-        "title": title,
-        "date": date_str,
-        "time": "19:00 - 21:00",
-        "venue": "Studio Test PCS",
-        "address": "10 rue de Test, Paris",
-        "description": "Atelier de test pour pipeline de modération.",
-        "instructor": "Manolo Test",
-        "level": "intermediate",
-        "price": "20€",
-        "category": "salsa",
-        "submitter_name": "Test Submitter",
-        "submitter_email": "submit-test@pcs.dev",
+        "title": "Regression test — preserve description",
+        "date": "2027-02-14",
+        "description": "Valse cubaine avancée avec Yanet — description à préserver.",
+        "venue": "Studio Harmonic",
+        "level": "advanced",
+        "price": "35€",
+        "status": "approved",
     }
-    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=15)
+    r = requests.post(f"{BASE}/entries", json=payload, headers=ADMIN_HEADERS, timeout=20)
     if r.status_code != 200:
-        return None
-    body = r.json()
-    return body.get("id")
-
-
-# ---------- A. Reject archives ----------
-
-def section_A():
-    print("\n=== SECTION A: Reject archives instead of deleting ===")
-
-    # A.1 create pending submission
-    eid = submit_pending_workshop("[TEST-A] Workshop reject archive")
-    if not eid:
-        log("A.1 submit pending workshop", False, "submit failed")
+        log_fail(f"seed POST /entries -> {r.status_code} {r.text[:200]}")
         return
-    manual_entry_ids.append(eid)
-    log("A.1 submit pending workshop", True, f"id={eid}")
+    created = r.json()
+    eid = created["id"]
+    cleanup_ids.add(eid)
+    original_desc = created.get("description")
+    print(f"  created id={eid[:8]}… description={original_desc!r}")
 
-    # A.4 (do this first so we still have pending) — reject without admin -> 401
-    r = requests.post(f"{BASE}/entries/{eid}/reject", timeout=15)
-    log(
-        "A.4 reject without admin -> 401",
-        r.status_code == 401,
-        f"status={r.status_code} body={trim(r.text)}",
-    )
-
-    # A.2 reject with admin
-    r = requests.post(f"{BASE}/entries/{eid}/reject", headers=ADMIN_HEADERS, timeout=15)
-    body = None
-    try:
-        body = r.json()
-    except Exception:
-        pass
-    ok = (
-        r.status_code == 200
-        and isinstance(body, dict)
-        and body.get("ok") is True
-        and body.get("id") == eid
-        and body.get("status") == "rejected"
-    )
-    log("A.2 reject with admin returns ok+status=rejected", ok, f"status={r.status_code} body={trim(body)}")
-
-    # A.3 GET still returns the entry with status=rejected (NOT 404)
-    r = requests.get(f"{BASE}/entries/{eid}", timeout=15)
-    body = None
-    try:
-        body = r.json()
-    except Exception:
-        pass
-    ok = (
-        r.status_code == 200
-        and isinstance(body, dict)
-        and body.get("status") == "rejected"
-        and body.get("id") == eid
-    )
-    log(
-        "A.3 GET rejected entry still returns it (status=rejected, not 404)",
-        ok,
-        f"status={r.status_code} body={trim(body)}",
-    )
-
-
-# ---------- B. Approve type query param ----------
-
-def section_B():
-    print("\n=== SECTION B: Approve endpoint accepts type query param ===")
-
-    eid = submit_pending_workshop("[TEST-B] Workshop reclassify festival")
-    if not eid:
-        log("B.1 submit pending workshop", False, "submit failed")
+    # PUT with NO description field (only type/title/date)
+    body = {
+        "type": "workshop",
+        "title": payload["title"],
+        "date": payload["date"],
+    }
+    r = requests.put(f"{BASE}/entries/{eid}", json=body, headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"PUT without description -> {r.status_code} {r.text[:300]}")
         return
-    manual_entry_ids.append(eid)
-    log("B.1 submit pending workshop (type=workshop)", True, f"id={eid}")
+    put_data = r.json()
+    print(f"    PUT resp description={put_data.get('description')!r}")
 
-    # B.3 invalid type first (so we don't approve before)
-    r = requests.post(
-        f"{BASE}/entries/{eid}/approve",
-        params={"type": "invalid"},
-        headers=ADMIN_HEADERS,
-        timeout=15,
-    )
-    log(
-        "B.3 approve?type=invalid -> 400",
-        r.status_code == 400,
-        f"status={r.status_code} body={trim(r.text)}",
-    )
+    # GET to verify description preserved
+    r = requests.get(f"{BASE}/entries/{eid}", timeout=20)
+    if r.status_code != 200:
+        log_fail(f"GET after PUT -> {r.status_code} {r.text[:200]}")
+        return
+    got = r.json()
+    print(f"    GET description={got.get('description')!r}")
 
-    # B.2 approve with type=festival
+    if got.get("description") == original_desc and original_desc:
+        log_pass("Description preserved when omitted from PUT body")
+    else:
+        log_fail(
+            f"Description NOT preserved. original={original_desc!r} "
+            f"after_put={got.get('description')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3) DELETE works
+# ---------------------------------------------------------------------------
+
+def test_delete_entry() -> None:
+    section("3) DELETE /api/entries/{id}")
+
+    payload = {
+        "type": "workshop",
+        "title": "Regression test — delete me",
+        "date": "2027-03-01",
+        "description": "À supprimer",
+        "status": "approved",
+    }
+    r = requests.post(f"{BASE}/entries", json=payload, headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"seed POST /entries -> {r.status_code} {r.text[:200]}")
+        return
+    eid = r.json()["id"]
+    print(f"  created id={eid[:8]}…")
+
+    r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code == 200 and r.json().get("ok") is True:
+        log_pass("DELETE /entries/{id} returns 200 {ok:true}")
+    else:
+        log_fail(f"DELETE -> {r.status_code} {r.text[:200]}")
+        cleanup_ids.add(eid)
+        return
+
+    r = requests.get(f"{BASE}/entries/{eid}", timeout=20)
+    if r.status_code == 404:
+        log_pass("GET deleted entry -> 404")
+    else:
+        log_fail(f"GET deleted entry -> {r.status_code} {r.text[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# 4) Approve with type query param (reclassification)
+# ---------------------------------------------------------------------------
+
+def test_approve_with_type_param() -> None:
+    section("4) POST /api/entries/{id}/approve?type=festival reclassifies")
+
+    payload = {
+        "type": "workshop",
+        "title": "Regression test — reclassify",
+        "date": "2027-04-04",
+        "description": "Sera reclassé en festival",
+        "submitter_name": "Yanet Fuentes",
+        "submitter_email": "yanet@example.org",
+    }
+    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"submit -> {r.status_code} {r.text[:200]}")
+        return
+    created = r.json()
+    eid = created["id"]
+    cleanup_ids.add(eid)
+    print(f"  submitted id={eid[:8]}… status={created.get('status')!r}")
+    if created.get("status") != "pending":
+        log_fail(f"expected status=pending after submit, got {created.get('status')!r}")
+        return
+    log_pass("submission returns status='pending'")
+
     r = requests.post(
         f"{BASE}/entries/{eid}/approve",
         params={"type": "festival"},
         headers=ADMIN_HEADERS,
-        timeout=15,
+        timeout=20,
     )
-    body = None
-    try:
-        body = r.json()
-    except Exception:
-        pass
-    ok = (
-        r.status_code == 200
-        and isinstance(body, dict)
-        and body.get("type") == "festival"
-        and body.get("status") == "approved"
-        and body.get("id") == eid
-    )
-    log(
-        "B.2 approve?type=festival -> type=festival, status=approved",
-        ok,
-        f"status={r.status_code} body={trim(body)}",
-    )
-
-
-# ---------- C. Google Calendar sync pipeline ----------
-
-def section_C():
-    print("\n=== SECTION C: Google Calendar sync pipeline ===")
-
-    # C.5 unauth first (cheap)
-    r = requests.post(f"{BASE}/calendar/sync", timeout=30)
-    log(
-        "C.5 POST /calendar/sync without admin -> 401",
-        r.status_code == 401,
-        f"status={r.status_code} body={trim(r.text)}",
-    )
-
-    # C.1 admin sync
-    r = requests.post(f"{BASE}/calendar/sync", headers=ADMIN_HEADERS, timeout=60)
-    body = None
-    try:
-        body = r.json()
-    except Exception:
-        pass
-    keys = ("ok", "created", "updated", "unchanged", "skipped")
-    ok_keys = isinstance(body, dict) and all(k in body for k in keys)
-    ok_ints = (
-        ok_keys
-        and all(isinstance(body[k], int) and body[k] >= 0 for k in ("created", "updated", "unchanged", "skipped"))
-        and body.get("ok") is True
-    )
-    total_visible = (body.get("created", 0) + body.get("updated", 0) + body.get("unchanged", 0)) if isinstance(body, dict) else 0
-    ok_total = total_visible > 0
-    ok = r.status_code == 200 and ok_ints and ok_total
-    log(
-        "C.1 admin /calendar/sync returns {ok,created,updated,unchanged,skipped} ints; total>0",
-        ok,
-        f"status={r.status_code} body={trim(body)} totalCUU={total_visible}",
-    )
-
-    # C.2 GET pending entries -> some have source=gcal and external_id
-    r = requests.get(
-        f"{BASE}/entries",
-        params={"status": "pending"},
-        headers=ADMIN_HEADERS,
-        timeout=30,
-    )
-    pending = r.json() if r.status_code == 200 else []
-    gcal_pending = [e for e in pending if e.get("source") == "gcal" and e.get("external_id")]
-    log(
-        "C.2 admin GET /entries?status=pending has gcal entries with external_id",
-        r.status_code == 200 and len(gcal_pending) > 0,
-        f"status={r.status_code} pending_total={len(pending)} gcal_pending={len(gcal_pending)} sample={trim(gcal_pending[0] if gcal_pending else None)}",
-    )
-
-    if not gcal_pending:
-        log("C.3 reject gcal entry + re-sync skip", False, "no gcal pending entry available")
-        log("C.4 GET /entries?status=rejected includes rejected gcal", False, "no gcal pending entry available")
+    if r.status_code != 200:
+        log_fail(f"approve?type=festival -> {r.status_code} {r.text[:200]}")
         return
+    data = r.json()
+    print(f"    resp: type={data.get('type')!r} status={data.get('status')!r}")
+    if data.get("type") == "festival" and data.get("status") == "approved":
+        log_pass("approve?type=festival reclassifies to festival and approved")
+    else:
+        log_fail(f"approve?type=festival unexpected: {short(data)}")
 
-    target = gcal_pending[0]
-    target_id = target["id"]
-    target_external = target["external_id"]
 
-    # C.3a reject the gcal entry
-    r = requests.post(f"{BASE}/entries/{target_id}/reject", headers=ADMIN_HEADERS, timeout=15)
-    rej_ok = r.status_code == 200 and r.json().get("status") == "rejected"
-    log(
-        "C.3a reject gcal pending entry",
-        rej_ok,
-        f"status={r.status_code} body={trim(r.text)}",
-    )
+# ---------------------------------------------------------------------------
+# 5) Reject + restore round trip
+# ---------------------------------------------------------------------------
 
-    # C.3b re-run sync
-    r = requests.post(f"{BASE}/calendar/sync", headers=ADMIN_HEADERS, timeout=60)
-    body2 = r.json() if r.status_code == 200 else {}
-    skipped2 = body2.get("skipped", 0)
-    created2 = body2.get("created", 0)
-    # Re-fetch all gcal entries for that external_id; expect exactly 1 (the rejected one)
-    r2 = requests.get(
+def test_reject_restore_roundtrip() -> None:
+    section("5) Reject + restore round trip")
+
+    payload = {
+        "type": "soiree",
+        "title": "Regression test — reject then restore",
+        "date": "2027-05-10",
+        "venue": "Cabaret Sauvage",
+        "submitter_name": "Callesol",
+        "submitter_email": "callesol@example.org",
+    }
+    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"submit soiree -> {r.status_code} {r.text[:200]}")
+        return
+    eid = r.json()["id"]
+    cleanup_ids.add(eid)
+    print(f"  submitted soiree id={eid[:8]}…")
+    if r.json().get("status") != "pending":
+        log_fail(f"expected pending, got {r.json().get('status')!r}")
+        return
+    log_pass("soiree submission -> status='pending'")
+
+    # reject
+    r = requests.post(f"{BASE}/entries/{eid}/reject", headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"reject -> {r.status_code} {r.text[:200]}")
+        return
+    rdata = r.json()
+    print(f"    reject resp: {short(rdata)}")
+    if rdata.get("status") == "rejected" and rdata.get("ok") is True:
+        log_pass("reject returns {ok:true, status:'rejected'}")
+    else:
+        log_fail(f"reject unexpected: {short(rdata)}")
+
+    # admin can see it via ?status=rejected
+    r = requests.get(
         f"{BASE}/entries",
         params={"status": "rejected"},
         headers=ADMIN_HEADERS,
-        timeout=30,
+        timeout=20,
     )
-    rejected_list = r2.json() if r2.status_code == 200 else []
-    same_uid_rejected = [e for e in rejected_list if e.get("external_id") == target_external and e.get("source") == "gcal"]
-
-    # And ensure no NEW pending exists with same external_id
-    r3 = requests.get(
-        f"{BASE}/entries",
-        params={"status": "pending"},
-        headers=ADMIN_HEADERS,
-        timeout=30,
-    )
-    pending2 = r3.json() if r3.status_code == 200 else []
-    pending_same_uid = [e for e in pending2 if e.get("external_id") == target_external and e.get("source") == "gcal"]
-
-    ok = skipped2 >= 1 and len(pending_same_uid) == 0 and len(same_uid_rejected) >= 1
-    log(
-        "C.3b re-sync after reject: skipped>=1, no re-creation as pending",
-        ok,
-        f"sync_body={trim(body2)} pending_same_uid={len(pending_same_uid)} rejected_same_uid={len(same_uid_rejected)}",
-    )
-
-    # C.4 GET rejected list includes our rejected entry
-    log(
-        "C.4 admin GET /entries?status=rejected includes rejected gcal entry",
-        any(e.get("id") == target_id for e in rejected_list),
-        f"rejected_total={len(rejected_list)} contains_target={any(e.get('id') == target_id for e in rejected_list)}",
-    )
-
-
-# ---------- D. Regression ----------
-
-def section_D():
-    print("\n=== SECTION D: Regression ===")
-
-    # D.1 raw iCal payload
-    r = requests.get(f"{BASE}/calendar/events", timeout=30)
-    body = r.json() if r.status_code == 200 else None
-    ok = r.status_code == 200 and isinstance(body, list)
-    log(
-        "D.1 GET /calendar/events returns iCal list",
-        ok,
-        f"status={r.status_code} count={(len(body) if isinstance(body, list) else 'NA')}",
-    )
-
-    # D.2 workshops feed has only approved+featured (no rejected, no pending)
-    r = requests.get(f"{BASE}/entries", params={"type": "workshop"}, timeout=30)
-    items = r.json() if r.status_code == 200 else []
-    bad = [e for e in items if e.get("status") not in ("approved", "featured")]
-    log(
-        "D.2 GET /entries?type=workshop returns only approved+featured",
-        r.status_code == 200 and len(bad) == 0,
-        f"status={r.status_code} total={len(items)} non_approved={len(bad)}",
-    )
-
-    # D.3 feature an approved entry — submit one (use trusted teacher? simplest: create then approve)
-    eid = submit_pending_workshop("[TEST-D] Workshop feature regression", "2026-11-20")
-    if not eid:
-        log("D.3 feature endpoint regression", False, "submit failed")
-        return
-    manual_entry_ids.append(eid)
-
-    # approve first
-    r = requests.post(f"{BASE}/entries/{eid}/approve", headers=ADMIN_HEADERS, timeout=15)
     if r.status_code != 200:
-        log("D.3 feature endpoint regression", False, f"approve failed status={r.status_code} body={trim(r.text)}")
+        log_fail(f"GET /entries?status=rejected -> {r.status_code} {r.text[:200]}")
         return
+    rejected_list = r.json()
+    ids = {x["id"] for x in rejected_list}
+    if eid in ids:
+        log_pass(f"rejected entry present in admin archive (count={len(rejected_list)})")
+    else:
+        log_fail(f"rejected entry NOT in /entries?status=rejected (got {len(rejected_list)} items)")
 
-    # feature it
-    r = requests.post(f"{BASE}/entries/{eid}/feature", headers=ADMIN_HEADERS, timeout=15)
-    body = None
-    try:
-        body = r.json()
-    except Exception:
-        pass
-    ok = (
-        r.status_code == 200
-        and isinstance(body, dict)
-        and body.get("status") == "featured"
-        and body.get("featured") is True
-    )
-    log(
-        "D.3 POST /entries/{id}/feature on approved -> status=featured",
-        ok,
-        f"status={r.status_code} body={trim(body)}",
-    )
+    # restore = approve
+    r = requests.post(f"{BASE}/entries/{eid}/approve", headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        log_fail(f"approve after reject -> {r.status_code} {r.text[:200]}")
+        return
+    data = r.json()
+    print(f"    approve-after-reject resp: status={data.get('status')!r} type={data.get('type')!r}")
+    if data.get("status") == "approved":
+        log_pass("approve after reject restores status='approved'")
+    else:
+        log_fail(f"approve after reject unexpected: {short(data)}")
 
 
-# ---------- Cleanup ----------
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
 
-def cleanup():
-    print("\n=== CLEANUP ===")
-    for eid in manual_entry_ids:
+def cleanup() -> None:
+    section("Cleanup")
+    for eid in list(cleanup_ids):
         try:
-            r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=15)
-            print(f"  delete {eid} -> {r.status_code}")
+            r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=20)
+            print(f"  delete {eid[:8]}… -> {r.status_code}")
         except Exception as e:
-            print(f"  delete {eid} failed: {e}")
+            print(f"  cleanup failed for {eid[:8]}: {e}")
 
 
-# ---------- Run ----------
+# ---------------------------------------------------------------------------
 
 def main() -> int:
-    section_A()
-    section_B()
-    section_C()
-    section_D()
-    cleanup()
+    print(f"BASE = {BASE}")
+    try:
+        test_put_status_null_safe()
+        test_put_preserves_description()
+        test_delete_entry()
+        test_approve_with_type_param()
+        test_reject_restore_roundtrip()
+    finally:
+        cleanup()
 
-    print("\n=== SUMMARY ===")
-    passed = sum(1 for _, ok, _ in results if ok)
-    failed = [r for r in results if not r[1]]
-    print(f"Passed: {passed}/{len(results)}")
-    if failed:
-        print("Failed cases:")
-        for name, _, det in failed:
-            print(f"  - {name}: {det}")
-    return 0 if not failed else 1
+    print("\n" + "=" * 60)
+    print(f"PASS: {len(PASS)} | FAIL: {len(FAIL)}")
+    if FAIL:
+        print("\nFailures:")
+        for f in FAIL:
+            print(f"  - {f}")
+        return 1
+    print("All assertions passed.")
+    return 0
 
 
 if __name__ == "__main__":

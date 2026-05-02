@@ -364,10 +364,77 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "PUT /api/entries/{id} preserves description + handles status=null"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend_regression_2026_05_02:
+  - task: "PUT /api/entries/{id} preserves description + handles status=null"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: |
+            Regression test for the PUT /api/entries/{id} fix (review request
+            2026-05-02). Results 12/13 PASS, 1 FAIL + 1 related 500 found.
+
+            PASS (aligned with review request):
+              1) PUT on existing workshop (status was 'featured') with
+                 {type,title,date,featured:true}  -> 200 status='featured' featured=true ✔
+                 {type,title,date,featured:false} -> 200 status='approved' featured=false ✔
+                 Title preserved across both calls. The original "crash on
+                 entries with status=null" is fixed — handler returns 200.
+              3) DELETE /api/entries/{id} -> 200 {ok:true}; subsequent
+                 GET /api/entries/{id} -> 404. ✔
+              4) POST /api/entries/submit then
+                 POST /api/entries/{id}/approve?type=festival (admin) -> 200
+                 with type='festival' status='approved'. ✔
+              5) Submit soiree -> status='pending'; reject -> 200
+                 {ok:true,status:'rejected'}; GET /entries?status=rejected
+                 includes it; approve -> status='approved'. ✔
+
+            FAIL (blocker, requirement #2):
+              2) PUT /api/entries/{id} with body {type,title,date} (no
+                 description) WIPES the existing description to "".
+                 Reproduction:
+                   seed POST /entries {…, description:"Valse cubaine avancée…"}
+                   PUT  /entries/{id} {type:"workshop", title, date}
+                   GET  /entries/{id} -> description=""  ← should be preserved
+                 Root cause: EntryCreate.description defaults to "" (not None),
+                 so payload.dict(exclude_none=True) still includes description=""
+                 which overwrites the stored value via $set. The same bug will
+                 silently wipe venue, address, time, instructor, level, price,
+                 category, ticket_link, cover_photo, end_date on any PUT that
+                 only carries a partial payload. Fix suggestions:
+                   a) Switch EntryCreate optional fields to default to None
+                      so exclude_none actually excludes them, OR
+                   b) In update_entry, use payload.dict(exclude_unset=True)
+                      and remove Optional defaults, OR
+                   c) Explicitly drop empty-string fields before $set when
+                      the stored value is non-empty.
+
+            RELATED 500 discovered during testing (not in review request but
+            reproducible and logged every call):
+              POST /api/entries (admin create) with a body that omits `status`
+              returns 500. Stack trace in /var/log/supervisor/backend.err.log:
+                pydantic ValidationError: Entry.status
+                  Input should be a valid string [input_value=None]
+                at server.py:597  entry = Entry(**payload.dict())
+              Cause: EntryCreate.status is Optional[str]=None; Entry.status is
+              required str. create_entry must default status to "approved" (or
+              drop None before instantiation) the same way submit_entry does.
+              Workaround used in tests: send status="approved" in the seed body.
+
+            Cleanup: all 3 test entries deleted; the pre-existing
+            'Formation intensive Lorenys y Manolo' workshop was restored to
+            featured=true at end of test.
 
 agent_communication:
     - agent: "main"

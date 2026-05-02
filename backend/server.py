@@ -606,9 +606,19 @@ async def update_entry(entry_id: str, payload: EntryCreate, _user: User = Depend
     existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entry not found")
-    update = payload.dict()
+    update = payload.dict(exclude_none=True)
+    # If the client sends featured=True, ensure status is featured (and vice versa)
+    if "featured" in update:
+        if update["featured"]:
+            update["status"] = "featured"
+        else:
+            # only downgrade to approved if currently featured
+            if existing.get("status") == "featured":
+                update["status"] = "approved"
     await db.entries.update_one({"id": entry_id}, {"$set": update})
     merged = {**existing, **update, "id": entry_id}
+    if not merged.get("status"):
+        merged["status"] = "approved"
     return Entry(**merged)
 
 
