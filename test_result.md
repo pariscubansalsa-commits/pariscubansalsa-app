@@ -471,3 +471,54 @@ agent_communication:
         skips it instead of resurrecting it.
 
         No blockers. Backend is fully working. Test script: /app/backend_test.py.
+
+    - agent: "testing"
+      message: |
+        ## PWA configuration E2E (Mobile 390x844) — ALL 6 SCENARIOS PASS
+
+        Target: https://rhythm-frames-3.preview.emergentagent.com (read from
+        EXPO_PUBLIC_BACKEND_URL).
+
+        ### S1 — Manifest is reachable & valid ✅ PASS
+          GET /manifest.json -> 200, content-type application/json.
+          name="Paris Cuban Salsa", short_name="PCS", theme_color="#111111",
+          background_color="#111111", display="standalone", start_url="/",
+          icons=10 (>=8), at least one with purpose:"maskable". All 10 checks pass.
+
+        ### S2 — Icons reachable ✅ PASS
+          /icons/icon-192.png         -> 200, image/png, 4816 bytes
+          /icons/icon-512.png         -> 200, image/png, 14034 bytes
+          /icons/icon-maskable-512.png -> 200, image/png, 11181 bytes
+          All > 1000 bytes.
+
+        ### S3 — Service worker registered ✅ PASS
+          After 5s on /, navigator.serviceWorker.getRegistration() returned a
+          registration. scope = "https://rhythm-frames-3.preview.emergentagent.com/"
+          (ends with "/"). active scriptURL = /sw.js. After reload,
+          navigator.serviceWorker.controller != null (controlled by /sw.js).
+
+        ### S4 — Offline fallback ✅ PASS
+          GET /offline.html -> 200, body contains "hors connexion" and "PCS".
+
+        ### S5 — HTML head meta tags ✅ PASS
+          <title> = "Paris Cuban Salsa — Soirées · Concerts · Festivals · Artistes"
+          (contains "Paris Cuban Salsa" and starts with it via page.title()).
+          <meta name="theme-color" content="#111111"> present.
+          <meta name="apple-mobile-web-app-capable" content="yes"> present.
+          <meta name="apple-mobile-web-app-title" content="PCS"> present.
+          <link rel="manifest" href="/manifest.json"> present.
+          <link rel="apple-touch-icon"> present.
+          <meta property="og:image" content="/icons/icon-512.png"> present.
+
+        ### S6 — Install banner (iOS UA) ✅ PASS
+          Spawned new context with iOS Safari 17 UA, cleared
+          localStorage.pcs_pwa_banner_dismissed, navigated to /.
+          [data-testid="pwa-banner-ios"] became visible within ~5s.
+          Banner text contains "Installer Paris Cuban Salsa" plus the iOS
+          Share/Add-to-Home-Screen instructions.
+          Tapped [data-testid="pwa-banner-close"] -> banner disappeared.
+          Reloaded page -> banner did NOT reappear; localStorage flag
+          pcs_pwa_banner_dismissed = "1" persisted.
+
+        No console errors observed during the run. The PWA install / offline
+        plumbing is fully wired and working.
