@@ -317,6 +317,91 @@ agent_communication:
            rejected entry.
         Auth: see /app/memory/test_credentials.md.
 
+    - agent: "main"
+      message: |
+        BLOC 2+3+4 — Sécurité & espaces utilisateurs (Organisateur, Artiste).
+
+        New role-based system in place. Three seeded sessions for testing
+        (see /app/memory/test_credentials.md):
+        - admin → test_session_pcs_admin_000 (role=admin)
+        - organisateur → test_session_pcs_org_000 (role=organisateur, status=pending)
+        - artiste → test_session_pcs_art_000 (role=artiste, status=active, linked to a teacher)
+
+        Please verify EVERY scenario below using the provided Bearer tokens:
+
+        SECURITY (require_role):
+        - GET /api/admin/users without auth → 401
+        - GET /api/admin/users as organisateur token → 403 (NOT 401), detail mentions "Admin role required"
+        - GET /api/organisateur/entries as artiste token → 403
+        - GET /api/artiste/profile as organisateur token → 403
+        - GET /api/admin/users as admin token → 200
+
+        ORGANISATEUR FLOW (BLOC 3):
+        - GET /api/organisateur/entries (org token) → 200 list (initially empty)
+        - POST /api/organisateur/entries (org token) with body
+          {type:"soiree", title:"Test", date:"2026-12-01", venue:"X"} → 201/200,
+          response has status="pending", submitted_by=user_seeded_organizer,
+          source="organizer".
+        - PUT /api/organisateur/entries/{id} as org while status=pending → 200
+          (response keeps status=pending).
+        - DELETE /api/organisateur/entries/{id} as org while status=pending → 200.
+
+        BLOCKING APPROVAL WHEN ORG IS PENDING:
+        - Create another pending event as org token.
+        - POST /api/entries/{id}/approve as ADMIN while organizer.status='pending'
+          → 400 with detail "Le compte de l'organisateur/artiste n'est pas
+          encore approuvé. Approuvez son compte avant de valider ses
+          événements."
+        - POST /api/admin/users/user_seeded_organizer/approve-organizer
+          → 200 {status:"active"}.
+        - POST /api/entries/{id}/approve again → 200 status="approved".
+        - Now PUT /api/organisateur/entries/{id} as org → 403
+          "Seuls les événements en attente sont modifiables".
+        - Reset org back to pending afterwards (PUT to mongo or call
+          /admin/users/{id}/suspend then re-seed; cleanup is fine if you
+          remove created entries).
+
+        ADMIN USER MANAGEMENT:
+        - GET /api/admin/users?role=organisateur (admin) → returns array
+          including user_seeded_organizer with status, organizer.structure_name,
+          submitted_entries, pending_entries fields.
+        - POST /api/admin/users/{user_id}/suspend → 200 (sets status=suspended,
+          revokes sessions). NOTE: trying to suspend an admin user must return
+          400 with "Impossible de suspendre un admin".
+        - POST /api/admin/users/{user_id}/reactivate → 200 status=active.
+
+        ARTISTE FLOW (BLOC 4):
+        - GET /api/artiste/profile (art token) → 200 Teacher object
+        - PUT /api/artiste/profile (art token) {bio:"hola"} → 200, persists bio.
+          Confirm name and trusted_teacher are NOT mutated by the PUT (they
+          aren't in ArtisteProfileUpdate model).
+        - GET /api/artiste/workshops (art token) → 200 list
+        - POST /api/artiste/workshops (art token) {title:"Test WS", date:"2026-12-15"}
+          → 200, status="pending", type="workshop", teacher_id=user.artist_teacher_id,
+          submitted_by=user_seeded_artiste, source="artiste".
+        - PUT /api/artiste/workshops/{id} as art while pending → 200.
+        - DELETE /api/artiste/workshops/{id} as art while pending → 200.
+
+        ARTISTE CLAIM ADMIN:
+        - Set up a fresh visitor user manually (insert into users collection
+          with role="visiteur"). Then POST /api/auth/signup/artiste with
+          teacher_id of an existing teacher → status becomes "pending" with
+          pending_artist_claim populated.
+        - GET /api/admin/users?role=artiste (admin) → finds the new claim.
+        - POST /api/admin/users/{user_id}/approve-artist with body
+          {"teacher_id": "<same teacher id>"} → 200 (status="active",
+          artist_teacher_id set, pending_artist_claim cleared).
+        - POST /api/admin/users/{user_id}/reject-artist → 200 (role reverts
+          to "visiteur").
+
+        REGRESSION:
+        - GET /api/auth/me with admin token → response now includes role="admin",
+          status="active" (new fields).
+        - GET /api/entries (no auth) → still returns only public entries
+          (no leak of pending org submissions).
+
+        Please clean up any test entries you create.
+
         - working: true
           agent: "testing"
           comment: "Verified end-to-end. Tapping 'PROPOSER UN WORKSHOP' on Lorenys profile opens modal sheet with title 'Proposer un workshop'. The teacher chip selector (FICHE PROF optional) is HIDDEN as expected. Yellow locked banner 'Ce workshop sera rattaché à cette fiche prof.' is shown. Filled and submitted form (Test Workshop E2E / 2026-09-15 / Intermédiaire / Salsa cubaine / 60€ / Tester E2E / tester-e2e@example.com) -> success screen 'Merci !' with checkmark appeared. After reload, 'Test Workshop E2E' appears on Lorenys profile (auto-approved via trusted_teacher flag). All 5 scenarios PASSED."
@@ -364,11 +449,164 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "PUT /api/entries/{id} preserves description + handles status=null"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+bloc_2_3_4_security_roles:
+  - task: "BLOC 2 — require_role / require_admin (401 vs 403)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 7 security assertions PASS.
+            - GET /api/admin/users no-auth -> 401 ✔
+            - GET /api/admin/users as organisateur token -> 403 ✔
+              detail contains "Admin role required" ✔
+            - GET /api/organisateur/entries as artiste token -> 403 ✔
+            - GET /api/artiste/profile as organisateur token -> 403 ✔
+            - GET /api/admin/users as admin token -> 200 ✔
+            - GET /api/organisateur/entries no-auth -> 401 ✔
+            - GET /api/artiste/profile no-auth -> 401 ✔
+
+  - task: "BLOC 3 — Organisateur CRUD /api/organisateur/entries"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 8 CRUD assertions PASS.
+            - GET /organisateur/entries -> 200
+            - POST {type:soiree,title,date,venue} -> 200 with status=pending,
+              submitted_by=user_seeded_organizer, source=organizer
+            - PUT pending entry -> 200, keeps status=pending
+            - DELETE pending entry -> 200
+
+  - task: "BLOC 3 — Approval blocking + post-approval edit lock"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 8 assertions PASS.
+            - With organizer.status='pending':
+                POST /api/entries/{id}/approve as admin -> 400 with the EXACT
+                French detail "Le compte de l'organisateur/artiste n'est pas
+                encore approuvé. Approuvez son compte avant de valider ses
+                événements." ✔
+            - POST /api/admin/users/user_seeded_organizer/approve-organizer
+              as admin -> 200 {status:active} ✔
+            - Re-approve same entry -> 200 status='approved' ✔
+            - PUT on the now-approved entry as organizer -> 403 with detail
+              "Seuls les événements en attente sont modifiables" ✔
+
+  - task: "BLOC 4 — Admin user management (list/approve/suspend/reactivate)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 13 assertions PASS.
+            - GET /api/admin/users?role=organisateur (admin) -> 200, includes
+              user_seeded_organizer with: status, organizer.structure_name,
+              submitted_entries, pending_entries enrichment fields ✔
+            - POST /api/admin/users/user_seeded_admin/suspend -> 400
+              "Impossible de suspendre un admin" ✔
+            - POST /api/admin/users/user_seeded_organizer/suspend -> 200,
+              status='suspended' ✔
+            - Suspended user's Bearer token is now revoked: GET /auth/me
+              with org token -> 401 (sessions deleted on suspend) ✔
+            - POST /api/admin/users/{id}/reactivate -> 200 status='active' ✔
+
+  - task: "BLOC 4 — Artiste profile + workshops CRUD"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 13 assertions PASS.
+            - GET /api/artiste/profile -> 200 (Teacher object).
+            - PUT /api/artiste/profile {bio, name (admin field), trusted_teacher (admin field)}
+              -> 200; bio is persisted; BOTH name and trusted_teacher are NOT
+              mutated by the PUT (ArtisteProfileUpdate model rejects them). ✔
+            - GET /api/artiste/workshops -> 200.
+            - POST /api/artiste/workshops {title, date} -> 200 with
+              status='pending', type='workshop',
+              teacher_id == user.artist_teacher_id,
+              submitted_by='user_seeded_artiste', source='artiste'. ✔
+            - PUT /api/artiste/workshops/{id} (pending) -> 200.
+            - DELETE /api/artiste/workshops/{id} (pending) -> 200.
+
+  - task: "BLOC 4 — Artist claim flow (signup -> approve -> reject)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 13 assertions PASS.
+            Setup: inserted a fresh visitor user + session directly in mongo.
+            - POST /api/auth/signup/artiste {teacher_id} as visitor -> 200,
+              role='artiste', status='pending', pending_artist_claim populated
+              with teacher_id and teacher_name. ✔
+            - GET /api/admin/users?role=artiste (admin) -> 200, includes the
+              new claimant. ✔
+            - POST /api/admin/users/{id}/approve-artist {teacher_id:<same>}
+              -> 200. DB: status='active', artist_teacher_id set,
+              pending_artist_claim cleared. ✔
+            - POST /api/admin/users/{id}/reject-artist -> 200. DB: role
+              reverts to 'visiteur', status='active', artist_teacher_id null. ✔
+            Cleanup: visitor user + session deleted from mongo.
+
+  - task: "BLOC 2+3+4 — Regression /auth/me admin + public /entries no leak"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 4 assertions PASS.
+            - GET /api/auth/me with admin Bearer -> 200; response includes
+              role='admin' AND status='active' (new fields). ✔
+            - Public GET /api/entries (no auth) does NOT leak a freshly
+              created pending organizer-submitted soirée (id verified absent
+              from public list). Default status filter
+              {$in: [approved, featured]} correctly hides pending. ✔
 
 backend_regression_2026_05_02:
   - task: "PUT /api/entries/{id} preserves description + handles status=null"
@@ -683,3 +921,93 @@ agent_communication:
 
         Test script: /app/backend_test.py (re-runnable with
         BACKEND_URL env override). All test-created data cleaned up.
+
+    - agent: "testing"
+      message: |
+        ## BLOC 2+3+4 — Sécurité & espaces utilisateurs (Organisateur, Artiste)
+        ## ALL 68 ASSERTIONS PASS — 0 FAILURES
+
+        Test script: /app/backend_test.py against
+        https://rhythm-frames-3.preview.emergentagent.com/api with the three
+        seeded Bearer tokens (admin / organisateur / artiste). Re-seeded
+        before run via `cd /app/backend && python seed.py`.
+
+        ### 1. Security (require_role / require_admin) — 7/7 PASS
+          - GET /admin/users no-auth -> 401 ✔
+          - GET /admin/users as organisateur -> 403 with "Admin role required" ✔
+          - GET /organisateur/entries as artiste -> 403 ✔
+          - GET /artiste/profile as organisateur -> 403 ✔
+          - GET /admin/users as admin -> 200 ✔
+          - GET /organisateur/entries no-auth -> 401 ✔
+          - GET /artiste/profile no-auth -> 401 ✔
+          The role distinction (401 missing token vs 403 wrong role) is
+          correctly enforced everywhere.
+
+        ### 2. Organisateur CRUD — 8/8 PASS
+          - GET /organisateur/entries -> 200
+          - POST /organisateur/entries {soiree, title, date, venue} -> 200,
+            status='pending', submitted_by='user_seeded_organizer',
+            source='organizer'
+          - PUT (pending) -> 200, status remains 'pending'
+          - DELETE (pending) -> 200
+
+        ### 3. Approval blocking + post-approval edit lock — 8/8 PASS
+          With organizer.status='pending':
+          - POST /api/entries/{id}/approve as admin -> 400 with EXACT FR
+            detail "Le compte de l'organisateur/artiste n'est pas encore
+            approuvé. Approuvez son compte avant de valider ses événements." ✔
+          After POST /admin/users/{org}/approve-organizer (200, status='active'):
+          - Same approve call -> 200 status='approved' ✔
+          - PUT on approved entry as org -> 403 with detail "Seuls les
+            événements en attente sont modifiables" ✔
+
+        ### 4. Admin user management — 13/13 PASS
+          - GET /admin/users?role=organisateur -> 200, includes seeded org
+            with status / organizer.structure_name / submitted_entries /
+            pending_entries enrichment ✔
+          - POST /admin/users/{admin_id}/suspend -> 400 "Impossible de
+            suspendre un admin" ✔ (admin protection enforced)
+          - POST /admin/users/{org_id}/suspend -> 200 status='suspended' ✔
+          - Bearer token of suspended user -> 401 (sessions are revoked
+            on suspend, confirmed by /auth/me) ✔
+          - POST /admin/users/{org_id}/reactivate -> 200 status='active' ✔
+          - Org session was re-seeded for follow-up tests.
+
+        ### 5. Artiste profile + workshops — 13/13 PASS
+          - GET /artiste/profile -> 200 (Teacher object).
+          - PUT /artiste/profile {bio, name (admin field), trusted_teacher
+            (admin field)} -> 200; bio persisted; name and trusted_teacher
+            are NOT mutated (ArtisteProfileUpdate model excludes them). ✔
+          - GET /artiste/workshops -> 200.
+          - POST /artiste/workshops {title, date} -> 200, status='pending',
+            type='workshop', teacher_id=user.artist_teacher_id,
+            submitted_by='user_seeded_artiste', source='artiste'. ✔
+          - PUT pending workshop -> 200; DELETE pending -> 200. ✔
+
+        ### 6. Artist claim flow — 13/13 PASS
+          Inserted a fresh visitor + session in mongo, then:
+          - POST /auth/signup/artiste {teacher_id} -> 200, role='artiste',
+            status='pending', pending_artist_claim populated ✔
+          - GET /admin/users?role=artiste includes the new claimant ✔
+          - POST /admin/users/{id}/approve-artist {teacher_id:<same>} -> 200;
+            DB shows status='active', artist_teacher_id set,
+            pending_artist_claim cleared ✔
+          - POST /admin/users/{id}/reject-artist -> 200; DB shows
+            role='visiteur', status='active', artist_teacher_id null ✔
+          Visitor user + session cleaned up.
+
+        ### 7. Regression — 4/4 PASS
+          - GET /auth/me with admin Bearer -> 200 with role='admin' AND
+            status='active' (new fields) ✔
+          - Public GET /api/entries (no auth) does NOT leak a freshly created
+            pending org-submitted soirée (id verified absent from list) ✔
+
+        ### Cleanup
+          - All 2 test entries (org-created) deleted via direct mongo.
+          - Visitor user + session deleted.
+          - Org status reset to 'pending' (seed default).
+          - Admin / org / artiste sessions re-seeded so the next run works.
+          - Artist teacher's bio/name/trusted_teacher restored to original
+            values from the snapshot taken at the start of section 5.
+
+        No blockers. Backend BLOC 2+3+4 is fully working.

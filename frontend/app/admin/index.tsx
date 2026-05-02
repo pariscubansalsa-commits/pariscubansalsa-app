@@ -31,6 +31,20 @@ export default function AdminDashboard() {
       path: "/admin/teachers",
     },
     {
+      key: "users",
+      title: "Comptes utilisateurs",
+      desc: "Approuver organisateurs, valider les claims artistes, suspendre des comptes",
+      icon: "person-circle-outline" as const,
+      path: "/admin/users",
+    },
+    {
+      key: "analytics",
+      title: "Analytics",
+      desc: "Visiteurs, top events, conversions, performance des coups de cœur",
+      icon: "stats-chart-outline" as const,
+      path: "/admin/analytics",
+    },
+    {
       key: "gallery",
       title: "Galerie photo",
       desc: "Événements photos, uploads, tags",

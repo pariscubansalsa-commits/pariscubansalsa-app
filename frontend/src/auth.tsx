@@ -8,6 +8,16 @@ type AuthUser = {
   name: string;
   picture?: string;
   is_admin: boolean;
+  role?: "admin" | "organisateur" | "artiste" | "visiteur";
+  status?: "active" | "pending" | "suspended";
+  organizer?: {
+    structure_name?: string;
+    motivation?: string;
+    phone?: string;
+    website?: string;
+  } | null;
+  artist_teacher_id?: string | null;
+  pending_artist_claim?: any;
 };
 
 type AuthCtx = {

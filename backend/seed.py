@@ -14,6 +14,16 @@ TEST_EMAIL = "admin.test@pariscubansalsa.dev"
 TEST_USER_ID = "user_seeded_admin"
 TEST_SESSION_TOKEN = "test_session_pcs_admin_000"
 
+# Organisateur test account
+ORG_EMAIL = "organizer.test@pariscubansalsa.dev"
+ORG_USER_ID = "user_seeded_organizer"
+ORG_SESSION_TOKEN = "test_session_pcs_org_000"
+
+# Artiste test account (linked once we know which teacher)
+ART_EMAIL = "artiste.test@pariscubansalsa.dev"
+ART_USER_ID = "user_seeded_artiste"
+ART_SESSION_TOKEN = "test_session_pcs_art_000"
+
 
 async def run():
     client = AsyncIOMotorClient(os.environ['MONGO_URL'])
@@ -28,6 +38,8 @@ async def run():
             "name": "PCS Admin",
             "picture": "",
             "is_admin": True,
+            "role": "admin",
+            "status": "active",
             "created_at": datetime.now(timezone.utc),
         }},
         upsert=True,
@@ -37,6 +49,71 @@ async def run():
         {"$set": {
             "user_id": TEST_USER_ID,
             "session_token": TEST_SESSION_TOKEN,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+            "created_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+    # Organisateur test account (status=pending so we can test approval flow)
+    await db.users.update_one(
+        {"email": ORG_EMAIL},
+        {"$set": {
+            "user_id": ORG_USER_ID,
+            "email": ORG_EMAIL,
+            "name": "Casa de la Salsa (Test)",
+            "picture": "",
+            "is_admin": False,
+            "role": "organisateur",
+            "status": "pending",
+            "organizer": {
+                "structure_name": "Casa de la Salsa (Test)",
+                "motivation": "Testeur automatique",
+                "phone": "",
+                "website": "",
+            },
+            "created_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+    await db.user_sessions.update_one(
+        {"session_token": ORG_SESSION_TOKEN},
+        {"$set": {
+            "user_id": ORG_USER_ID,
+            "session_token": ORG_SESSION_TOKEN,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+            "created_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+    # Artiste test account: link to a teacher if available
+    teacher_doc = await db.teachers.find_one({}, {"_id": 0})
+    artist_teacher_id = teacher_doc["id"] if teacher_doc else None
+    await db.users.update_one(
+        {"email": ART_EMAIL},
+        {"$set": {
+            "user_id": ART_USER_ID,
+            "email": ART_EMAIL,
+            "name": "Artiste Test",
+            "picture": "",
+            "is_admin": False,
+            "role": "artiste",
+            "status": "active" if artist_teacher_id else "pending",
+            "artist_teacher_id": artist_teacher_id,
+            "pending_artist_claim": None if artist_teacher_id else {
+                "requested_name": "Artiste à créer",
+                "message": "Compte test",
+            },
+            "created_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+    await db.user_sessions.update_one(
+        {"session_token": ART_SESSION_TOKEN},
+        {"$set": {
+            "user_id": ART_USER_ID,
+            "session_token": ART_SESSION_TOKEN,
             "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
             "created_at": datetime.now(timezone.utc),
         }},

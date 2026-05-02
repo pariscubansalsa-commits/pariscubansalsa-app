@@ -306,4 +306,158 @@ export const api = {
       credentials: "include",
       headers: authHeaders(token),
     }),
+
+  // Roles — signup
+  signupOrganisateur: (
+    token: string,
+    body: {
+      structure_name: string;
+      motivation?: string;
+      phone?: string;
+      website?: string;
+    }
+  ) =>
+    fetch(`${API}/auth/signup/organisateur`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<any>(r)),
+
+  signupArtiste: (
+    token: string,
+    body: {
+      teacher_id?: string;
+      requested_name?: string;
+      message?: string;
+    }
+  ) =>
+    fetch(`${API}/auth/signup/artiste`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<any>(r)),
+
+  // Organisateur — own dashboard
+  organisateurEntries: (token: string) =>
+    fetch(`${API}/organisateur/entries`, {
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem[]>(r)),
+
+  organisateurCreateEntry: (token: string, body: Partial<EntryItem>) =>
+    fetch(`${API}/organisateur/entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<EntryItem>(r)),
+
+  organisateurUpdateEntry: (token: string, id: string, body: Partial<EntryItem>) =>
+    fetch(`${API}/organisateur/entries/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<EntryItem>(r)),
+
+  organisateurDeleteEntry: (token: string, id: string) =>
+    fetch(`${API}/organisateur/entries/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
+
+  // Artiste — own profile + workshops
+  artisteProfile: (token: string) =>
+    fetch(`${API}/artiste/profile`, {
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<TeacherItem>(r)),
+
+  artisteUpdateProfile: (token: string, body: Partial<TeacherItem>) =>
+    fetch(`${API}/artiste/profile`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<TeacherItem>(r)),
+
+  artisteWorkshops: (token: string) =>
+    fetch(`${API}/artiste/workshops`, {
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem[]>(r)),
+
+  artisteCreateWorkshop: (token: string, body: Partial<EntryItem>) =>
+    fetch(`${API}/artiste/workshops`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<EntryItem>(r)),
+
+  artisteUpdateWorkshop: (token: string, id: string, body: Partial<EntryItem>) =>
+    fetch(`${API}/artiste/workshops/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<EntryItem>(r)),
+
+  artisteDeleteWorkshop: (token: string, id: string) =>
+    fetch(`${API}/artiste/workshops/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
+
+  // Admin — manage users
+  adminListUsers: (token: string, params?: { role?: string; status?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.role) qs.set("role", params.role);
+    if (params?.status) qs.set("status", params.status);
+    const q = qs.toString();
+    return fetch(`${API}/admin/users${q ? `?${q}` : ""}`, {
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any[]>(r));
+  },
+
+  adminApproveOrganizer: (token: string, userId: string) =>
+    fetch(`${API}/admin/users/${userId}/approve-organizer`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
+
+  adminSuspendUser: (token: string, userId: string) =>
+    fetch(`${API}/admin/users/${userId}/suspend`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
+
+  adminReactivateUser: (token: string, userId: string) =>
+    fetch(`${API}/admin/users/${userId}/reactivate`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
+
+  adminApproveArtist: (token: string, userId: string, body: { teacher_id?: string }) =>
+    fetch(`${API}/admin/users/${userId}/approve-artist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(body),
+    }).then((r) => handle<any>(r)),
+
+  adminRejectArtist: (token: string, userId: string) =>
+    fetch(`${API}/admin/users/${userId}/reject-artist`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<any>(r)),
 };

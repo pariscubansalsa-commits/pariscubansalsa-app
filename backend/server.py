@@ -114,7 +114,8 @@ class Entry(BaseModel):
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
     submitter_email: Optional[str] = ""
-    source: str = "manual"  # 'manual' | 'gcal' | 'submission' | 'organizer'
+    submitted_by: Optional[str] = None  # user_id of the user who submitted (organizer/artist)
+    source: str = "manual"  # 'manual' | 'gcal' | 'submission' | 'organizer' | 'artiste'
     external_id: Optional[str] = None  # iCal UID for gcal sync
     last_modified_at: Optional[datetime] = None  # for gcal change detection
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -181,12 +182,29 @@ class TeacherCreate(BaseModel):
     trusted_teacher: bool = False
 
 
+class OrganizerProfile(BaseModel):
+    structure_name: Optional[str] = ""
+    motivation: Optional[str] = ""
+    phone: Optional[str] = ""
+    website: Optional[str] = ""
+
+
 class User(BaseModel):
     user_id: str
     email: str
     name: str
     picture: Optional[str] = ""
     is_admin: bool = False
+    role: str = "visiteur"  # 'admin' | 'organisateur' | 'artiste' | 'visiteur'
+    status: str = "active"  # 'active' | 'pending' | 'suspended'
+    organizer: Optional[OrganizerProfile] = None
+    artist_teacher_id: Optional[str] = None  # linked Teacher.id once claim approved
+    pending_artist_claim: Optional[dict] = None  # {teacher_id?, requested_name?, message?}
+    created_at: Optional[datetime] = None
+
+
+VALID_ROLES = {"admin", "organisateur", "artiste", "visiteur"}
+VALID_USER_STATUSES = {"active", "pending", "suspended"}
 
 
 # ========= Auth =========
@@ -221,8 +239,41 @@ async def get_current_user(request: Request) -> Optional[User]:
 
 async def require_admin(request: Request) -> User:
     user = await get_current_user(request)
-    if not user or not user.is_admin:
-        raise HTTPException(status_code=401, detail="Admin authentication required")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not user.is_admin and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return user
+
+
+def require_role(*allowed_roles: str):
+    """FastAPI dependency factory: require one of the given roles.
+
+    Returns 401 if not authenticated, 403 if role is not allowed.
+    Admin always passes.
+    """
+    allowed = set(allowed_roles)
+
+    async def _dep(request: Request) -> User:
+        user = await get_current_user(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if user.role == "admin" or user.is_admin:
+            return user
+        if user.role not in allowed:
+            raise HTTPException(status_code=403, detail=f"Role required: {', '.join(allowed)}")
+        # Suspended accounts are denied even if role matches
+        if user.status == "suspended":
+            raise HTTPException(status_code=403, detail="Account suspended")
+        return user
+
+    return _dep
+
+
+async def require_authenticated(request: Request) -> User:
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     return user
 
 
@@ -265,20 +316,36 @@ async def create_session(request: Request, response: Response):
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         user_id = existing["user_id"]
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture, "is_admin": admin_flag}},
-        )
+        update_doc = {"name": name, "picture": picture, "is_admin": admin_flag}
+        # If admin email, force role=admin / status=active
+        if admin_flag:
+            update_doc["role"] = "admin"
+            update_doc["status"] = "active"
+        else:
+            # Preserve existing role/status if set, otherwise default to visiteur/active
+            if not existing.get("role"):
+                update_doc["role"] = "visiteur"
+            if not existing.get("status"):
+                update_doc["status"] = "active"
+        await db.users.update_one({"user_id": user_id}, {"$set": update_doc})
+        # Reload merged user for response
+        user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
+        user_doc = {
             "user_id": user_id,
             "email": email,
             "name": name,
             "picture": picture,
             "is_admin": admin_flag,
+            "role": "admin" if admin_flag else "visiteur",
+            "status": "active",
+            "organizer": None,
+            "artist_teacher_id": None,
+            "pending_artist_claim": None,
             "created_at": datetime.now(timezone.utc),
-        })
+        }
+        await db.users.insert_one(dict(user_doc))
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     await db.user_sessions.insert_one({
@@ -304,6 +371,10 @@ async def create_session(request: Request, response: Response):
         "name": name,
         "picture": picture,
         "is_admin": admin_flag,
+        "role": user_doc.get("role", "visiteur"),
+        "status": user_doc.get("status", "active"),
+        "organizer": user_doc.get("organizer"),
+        "artist_teacher_id": user_doc.get("artist_teacher_id"),
         "session_token": session_token,
     }
 
@@ -556,10 +627,25 @@ async def approve_entry(
     _user: User = Depends(require_admin),
 ):
     """Approve a pending entry. Optionally re-categorise its type
-    (soiree | concert | workshop | festival) — used when validating GCal imports."""
+    (soiree | concert | workshop | festival) — used when validating GCal imports.
+
+    If the entry was submitted by an organizer/artist whose account is not yet
+    'active', refuse the approval and explain why.
+    """
     existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entry not found")
+
+    submitted_by = existing.get("submitted_by")
+    if submitted_by:
+        submitter = await db.users.find_one({"user_id": submitted_by}, {"_id": 0})
+        if submitter and submitter.get("status") != "active":
+            raise HTTPException(
+                status_code=400,
+                detail="Le compte de l'organisateur/artiste n'est pas encore approuvé. "
+                       "Approuvez son compte avant de valider ses événements.",
+            )
+
     update: dict = {"status": "approved"}
     if type:
         if type not in VALID_TYPES:
@@ -1010,7 +1096,707 @@ async def _startup_tasks():
     logger.info("Google Calendar background sync scheduled every %ss", GCAL_SYNC_INTERVAL)
 
 
+# ========= Roles — Organisateur & Artiste signups =========
+
+
+class OrganizerSignupInput(BaseModel):
+    structure_name: str
+    motivation: Optional[str] = ""
+    phone: Optional[str] = ""
+    website: Optional[str] = ""
+
+
+class ArtistClaimInput(BaseModel):
+    teacher_id: Optional[str] = None  # if claiming an existing teacher profile
+    requested_name: Optional[str] = ""  # if asking the admin to create a new profile
+    message: Optional[str] = ""
+
+
+def _user_public(u: dict) -> dict:
+    """Return only the public-facing fields of a user document."""
+    return {
+        "user_id": u.get("user_id"),
+        "email": u.get("email"),
+        "name": u.get("name"),
+        "picture": u.get("picture", ""),
+        "is_admin": u.get("is_admin", False),
+        "role": u.get("role", "visiteur"),
+        "status": u.get("status", "active"),
+        "organizer": u.get("organizer"),
+        "artist_teacher_id": u.get("artist_teacher_id"),
+        "pending_artist_claim": u.get("pending_artist_claim"),
+        "created_at": u.get("created_at"),
+    }
+
+
+@api_router.post("/auth/signup/organisateur")
+async def signup_organisateur(
+    payload: OrganizerSignupInput,
+    user: User = Depends(require_authenticated),
+):
+    """An authenticated visitor becomes an organizer. Account starts as 'pending'.
+    Once the admin approves it, status flips to 'active' and they can have their
+    submitted events validated."""
+    if not payload.structure_name.strip():
+        raise HTTPException(status_code=400, detail="Nom de structure requis")
+    # Admins keep being admins; they don't go through this flow
+    if user.is_admin or user.role == "admin":
+        raise HTTPException(status_code=400, detail="Compte admin déjà actif")
+    organizer = {
+        "structure_name": payload.structure_name.strip(),
+        "motivation": (payload.motivation or "").strip(),
+        "phone": (payload.phone or "").strip(),
+        "website": (payload.website or "").strip(),
+    }
+    await db.users.update_one(
+        {"user_id": user.user_id},
+        {"$set": {"role": "organisateur", "status": "pending", "organizer": organizer}},
+    )
+    fresh = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    return _user_public(fresh)
+
+
+@api_router.post("/auth/signup/artiste")
+async def signup_artiste(
+    payload: ArtistClaimInput,
+    user: User = Depends(require_authenticated),
+):
+    """An authenticated visitor claims an artist profile.
+
+    Two flows:
+    - teacher_id provided → claim an existing Teacher (admin must validate the link)
+    - requested_name provided → ask admin to create a new Teacher profile
+
+    Status starts at 'pending' until admin approves the claim.
+    """
+    if user.is_admin or user.role == "admin":
+        raise HTTPException(status_code=400, detail="Compte admin déjà actif")
+    if not payload.teacher_id and not (payload.requested_name or "").strip():
+        raise HTTPException(status_code=400, detail="Choisissez un profil ou saisissez un nom")
+
+    claim: dict = {"message": (payload.message or "").strip()}
+    if payload.teacher_id:
+        teacher = await db.teachers.find_one({"id": payload.teacher_id}, {"_id": 0})
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Profil artiste introuvable")
+        # Refuse if another user already claimed this teacher (active link)
+        existing_link = await db.users.find_one(
+            {"artist_teacher_id": payload.teacher_id, "status": "active"}, {"_id": 0}
+        )
+        if existing_link and existing_link["user_id"] != user.user_id:
+            raise HTTPException(status_code=400, detail="Ce profil est déjà revendiqué par un autre utilisateur")
+        claim["teacher_id"] = payload.teacher_id
+        claim["teacher_name"] = teacher.get("name", "")
+    else:
+        claim["requested_name"] = payload.requested_name.strip()
+
+    await db.users.update_one(
+        {"user_id": user.user_id},
+        {"$set": {
+            "role": "artiste",
+            "status": "pending",
+            "pending_artist_claim": claim,
+            "artist_teacher_id": None,
+        }},
+    )
+    fresh = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    return _user_public(fresh)
+
+
+# ========= Organisateur — own dashboard =========
+
+
+@api_router.get("/organisateur/entries", response_model=List[Entry])
+async def organisateur_entries(user: User = Depends(require_role("organisateur"))):
+    """List the entries submitted by the current organizer (any status)."""
+    items = await db.entries.find({"submitted_by": user.user_id}, {"_id": 0}).to_list(500)
+    items.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    return [Entry(**e) for e in items]
+
+
+class OrganizerEntryInput(BaseModel):
+    type: str
+    title: str
+    date: str
+    end_date: Optional[str] = None
+    time: Optional[str] = ""
+    venue: Optional[str] = ""
+    address: Optional[str] = ""
+    description: Optional[str] = ""
+    instructor: Optional[str] = ""
+    level: Optional[str] = ""
+    price: Optional[str] = ""
+    category: Optional[str] = ""
+    ticket_link: Optional[str] = ""
+    cover_photo: Optional[str] = None
+
+
+@api_router.post("/organisateur/entries", response_model=Entry)
+async def organisateur_create_entry(
+    payload: OrganizerEntryInput,
+    user: User = Depends(require_role("organisateur")),
+):
+    """Submit a new event. Always lands as 'pending' regardless of organizer status."""
+    if payload.type not in {"soiree", "workshop", "festival", "agenda"}:
+        raise HTTPException(status_code=400, detail="Type invalide")
+    if not payload.title.strip() or not payload.date.strip():
+        raise HTTPException(status_code=400, detail="Titre et date requis")
+    data = payload.dict()
+    data["status"] = "pending"
+    data["featured"] = False
+    data["submitter_name"] = (user.organizer.structure_name if user.organizer else user.name) or user.name
+    data["submitter_email"] = user.email
+    data["submitted_by"] = user.user_id
+    data["source"] = "organizer"
+    entry = Entry(**data)
+    await db.entries.insert_one(entry.dict())
+    return entry
+
+
+@api_router.put("/organisateur/entries/{entry_id}", response_model=Entry)
+async def organisateur_update_entry(
+    entry_id: str,
+    payload: OrganizerEntryInput,
+    user: User = Depends(require_role("organisateur")),
+):
+    """Update an own pending event. Approved/rejected events are read-only for organizer."""
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Événement introuvable")
+    if existing.get("submitted_by") != user.user_id:
+        raise HTTPException(status_code=403, detail="Cet événement ne vous appartient pas")
+    if existing.get("status") not in {"pending", None}:
+        raise HTTPException(status_code=403, detail="Seuls les événements en attente sont modifiables")
+    update = payload.dict(exclude_unset=True)
+    update["status"] = "pending"
+    await db.entries.update_one({"id": entry_id}, {"$set": update})
+    merged = {**existing, **update, "id": entry_id}
+    return Entry(**merged)
+
+
+@api_router.delete("/organisateur/entries/{entry_id}")
+async def organisateur_delete_entry(
+    entry_id: str,
+    user: User = Depends(require_role("organisateur")),
+):
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Événement introuvable")
+    if existing.get("submitted_by") != user.user_id:
+        raise HTTPException(status_code=403, detail="Cet événement ne vous appartient pas")
+    if existing.get("status") not in {"pending", None}:
+        raise HTTPException(status_code=403, detail="Seuls les événements en attente sont supprimables")
+    await db.entries.delete_one({"id": entry_id})
+    return {"ok": True}
+
+
+# ========= Artiste — own profile + workshops =========
+
+
+@api_router.get("/artiste/profile", response_model=Teacher)
+async def artiste_profile(user: User = Depends(require_role("artiste"))):
+    """Return the linked Teacher profile of the current artist."""
+    if not user.artist_teacher_id:
+        raise HTTPException(status_code=404, detail="Aucun profil artiste lié à ton compte")
+    t = await db.teachers.find_one({"id": user.artist_teacher_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Profil artiste introuvable")
+    return Teacher(**t)
+
+
+class ArtisteProfileUpdate(BaseModel):
+    bio: Optional[str] = None
+    photo: Optional[str] = None
+    instagram: Optional[str] = None
+    facebook: Optional[str] = None
+    dance_styles: Optional[List[str]] = None
+
+
+@api_router.put("/artiste/profile", response_model=Teacher)
+async def artiste_update_profile(
+    payload: ArtisteProfileUpdate,
+    user: User = Depends(require_role("artiste")),
+):
+    """Update the linked Teacher profile.
+    Cannot change name or trusted_teacher flag — admin-only fields."""
+    if not user.artist_teacher_id:
+        raise HTTPException(status_code=404, detail="Aucun profil artiste lié à ton compte")
+    update = {k: v for k, v in payload.dict().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="Aucune modification")
+    await db.teachers.update_one({"id": user.artist_teacher_id}, {"$set": update})
+    t = await db.teachers.find_one({"id": user.artist_teacher_id}, {"_id": 0})
+    return Teacher(**t)
+
+
+@api_router.get("/artiste/workshops", response_model=List[Entry])
+async def artiste_workshops(user: User = Depends(require_role("artiste"))):
+    """All workshops linked to the artist (any status)."""
+    if not user.artist_teacher_id:
+        raise HTTPException(status_code=404, detail="Aucun profil artiste lié à ton compte")
+    items = await db.entries.find(
+        {"$or": [
+            {"submitted_by": user.user_id},
+            {"teacher_id": user.artist_teacher_id, "type": "workshop"},
+        ]},
+        {"_id": 0},
+    ).to_list(500)
+    items.sort(key=lambda e: e.get("date") or "", reverse=True)
+    return [Entry(**e) for e in items]
+
+
+class ArtisteWorkshopInput(BaseModel):
+    title: str
+    date: str
+    end_date: Optional[str] = None
+    time: Optional[str] = ""
+    venue: Optional[str] = ""
+    address: Optional[str] = ""
+    description: Optional[str] = ""
+    level: Optional[str] = ""
+    price: Optional[str] = ""
+    category: Optional[str] = ""
+    ticket_link: Optional[str] = ""
+    cover_photo: Optional[str] = None
+
+
+@api_router.post("/artiste/workshops", response_model=Entry)
+async def artiste_create_workshop(
+    payload: ArtisteWorkshopInput,
+    user: User = Depends(require_role("artiste")),
+):
+    if not user.artist_teacher_id:
+        raise HTTPException(status_code=404, detail="Aucun profil artiste lié à ton compte")
+    if not payload.title.strip() or not payload.date.strip():
+        raise HTTPException(status_code=400, detail="Titre et date requis")
+    data = payload.dict()
+    data["type"] = "workshop"
+    data["teacher_id"] = user.artist_teacher_id
+    data["instructor"] = user.name
+    data["status"] = "pending"
+    data["featured"] = False
+    data["submitter_name"] = user.name
+    data["submitter_email"] = user.email
+    data["submitted_by"] = user.user_id
+    data["source"] = "artiste"
+    entry = Entry(**data)
+    await db.entries.insert_one(entry.dict())
+    return entry
+
+
+@api_router.put("/artiste/workshops/{entry_id}", response_model=Entry)
+async def artiste_update_workshop(
+    entry_id: str,
+    payload: ArtisteWorkshopInput,
+    user: User = Depends(require_role("artiste")),
+):
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workshop introuvable")
+    if existing.get("submitted_by") != user.user_id:
+        raise HTTPException(status_code=403, detail="Ce workshop ne vous appartient pas")
+    if existing.get("status") not in {"pending", None}:
+        raise HTTPException(status_code=403, detail="Seuls les workshops en attente sont modifiables")
+    update = payload.dict(exclude_unset=True)
+    update["status"] = "pending"
+    update["type"] = "workshop"
+    update["teacher_id"] = user.artist_teacher_id
+    await db.entries.update_one({"id": entry_id}, {"$set": update})
+    merged = {**existing, **update, "id": entry_id}
+    return Entry(**merged)
+
+
+@api_router.delete("/artiste/workshops/{entry_id}")
+async def artiste_delete_workshop(
+    entry_id: str,
+    user: User = Depends(require_role("artiste")),
+):
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workshop introuvable")
+    if existing.get("submitted_by") != user.user_id:
+        raise HTTPException(status_code=403, detail="Ce workshop ne vous appartient pas")
+    if existing.get("status") not in {"pending", None}:
+        raise HTTPException(status_code=403, detail="Seuls les workshops en attente sont supprimables")
+    await db.entries.delete_one({"id": entry_id})
+    return {"ok": True}
+
+
+# ========= Admin — manage organisateur & artiste accounts =========
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(
+    role: Optional[str] = None,
+    status: Optional[str] = None,
+    _admin: User = Depends(require_admin),
+):
+    """List all user accounts. Filter by role / status if provided."""
+    query: dict = {}
+    if role:
+        if role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail="Rôle invalide")
+        query["role"] = role
+    if status:
+        if status not in VALID_USER_STATUSES:
+            raise HTTPException(status_code=400, detail="Statut invalide")
+        query["status"] = status
+    users = await db.users.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # Enrich with submitted_entries counts (small N expected)
+    out = []
+    for u in users:
+        public = _user_public(u)
+        if u.get("role") in {"organisateur", "artiste"}:
+            count = await db.entries.count_documents({"submitted_by": u.get("user_id")})
+            pending = await db.entries.count_documents({"submitted_by": u.get("user_id"), "status": "pending"})
+            public["submitted_entries"] = count
+            public["pending_entries"] = pending
+        out.append(public)
+    return out
+
+
+@api_router.post("/admin/users/{user_id}/approve-organizer")
+async def admin_approve_organizer(user_id: str, _admin: User = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if u.get("role") != "organisateur":
+        raise HTTPException(status_code=400, detail="Cet utilisateur n'est pas un organisateur")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"status": "active"}})
+    return {"ok": True, "user_id": user_id, "status": "active"}
+
+
+@api_router.post("/admin/users/{user_id}/suspend")
+async def admin_suspend_user(user_id: str, _admin: User = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if u.get("is_admin") or u.get("role") == "admin":
+        raise HTTPException(status_code=400, detail="Impossible de suspendre un admin")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"status": "suspended"}})
+    # Also revoke active sessions
+    await db.user_sessions.delete_many({"user_id": user_id})
+    return {"ok": True, "user_id": user_id, "status": "suspended"}
+
+
+@api_router.post("/admin/users/{user_id}/reactivate")
+async def admin_reactivate_user(user_id: str, _admin: User = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"status": "active"}})
+    return {"ok": True, "user_id": user_id, "status": "active"}
+
+
+class ArtistApprovalInput(BaseModel):
+    teacher_id: Optional[str] = None  # if admin creates a new teacher, pass its id here
+
+
+@api_router.post("/admin/users/{user_id}/approve-artist")
+async def admin_approve_artist(
+    user_id: str,
+    payload: ArtistApprovalInput,
+    _admin: User = Depends(require_admin),
+):
+    """Approve an artist claim. Admin may provide a teacher_id (e.g. one they
+    just created for an unlisted artist), otherwise we use the teacher_id from
+    the original claim."""
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if u.get("role") != "artiste":
+        raise HTTPException(status_code=400, detail="Cet utilisateur n'est pas un artiste")
+    claim = u.get("pending_artist_claim") or {}
+    teacher_id = payload.teacher_id or claim.get("teacher_id")
+    if not teacher_id:
+        raise HTTPException(status_code=400, detail="teacher_id requis (sélection ou création préalable)")
+    teacher = await db.teachers.find_one({"id": teacher_id}, {"_id": 0})
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Profil artiste introuvable")
+    # Refuse if already linked to another active artist
+    other = await db.users.find_one(
+        {"artist_teacher_id": teacher_id, "status": "active", "user_id": {"$ne": user_id}},
+        {"_id": 0},
+    )
+    if other:
+        raise HTTPException(status_code=400, detail="Ce profil est déjà lié à un autre artiste actif")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "status": "active",
+            "artist_teacher_id": teacher_id,
+            "pending_artist_claim": None,
+        }},
+    )
+    return {"ok": True, "user_id": user_id, "teacher_id": teacher_id, "status": "active"}
+
+
+@api_router.post("/admin/users/{user_id}/reject-artist")
+async def admin_reject_artist(user_id: str, _admin: User = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "role": "visiteur",
+            "status": "active",
+            "pending_artist_claim": None,
+            "artist_teacher_id": None,
+        }},
+    )
+    return {"ok": True, "user_id": user_id}
+
+
 app.include_router(api_router)
+
+
+# ========= Analytics — events custom (P. 7a + 7b) =========
+
+
+class AnalyticsEvent(BaseModel):
+    """One user interaction logged in MongoDB."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str  # 'click_ticket' | 'click_share' | 'click_artist' | 'click_address'
+               # | 'photo_download' | 'photo_tag' | 'click_featured' | 'pwa_install'
+               # | 'view_entry' | 'view_artist'
+    entry_id: Optional[str] = None
+    teacher_id: Optional[str] = None
+    photo_id: Optional[str] = None
+    event_id: Optional[str] = None  # gallery event id
+    channel: Optional[str] = None  # for click_share: 'whatsapp' | 'instagram' | etc
+    url: Optional[str] = None
+    referrer: Optional[str] = None
+    user_agent: Optional[str] = None
+    session_id: Optional[str] = None
+    visitor_id: Optional[str] = None  # anonymized hash, set client-side
+    extra: Optional[dict] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class TrackEventInput(BaseModel):
+    name: str
+    entry_id: Optional[str] = None
+    teacher_id: Optional[str] = None
+    photo_id: Optional[str] = None
+    event_id: Optional[str] = None
+    channel: Optional[str] = None
+    url: Optional[str] = None
+    visitor_id: Optional[str] = None
+    extra: Optional[dict] = None
+
+
+@api_router.post("/analytics/track")
+async def track_event(payload: TrackEventInput, request: Request):
+    """Public endpoint — anyone can log an analytics event. We trust the
+    client name (whitelisted on the dashboard side anyway)."""
+    if not payload.name or len(payload.name) > 64:
+        raise HTTPException(status_code=400, detail="Invalid event name")
+    doc = AnalyticsEvent(
+        **payload.dict(),
+        referrer=request.headers.get("referer") or "",
+        user_agent=(request.headers.get("user-agent") or "")[:500],
+    ).dict()
+    await db.analytics_events.insert_one(doc)
+    return {"ok": True}
+
+
+def _period_to_after(period: str) -> datetime:
+    now = datetime.now(timezone.utc)
+    if period == "7d":
+        return now - timedelta(days=7)
+    if period == "90d":
+        return now - timedelta(days=90)
+    return now - timedelta(days=30)  # default 30d
+
+
+@api_router.get("/analytics/dashboard")
+async def analytics_dashboard(period: str = "30d", _user: User = Depends(require_admin)):
+    """Aggregate stats for the admin dashboard.
+
+    period: '7d' | '30d' | '90d'
+    """
+    after = _period_to_after(period)
+    match = {"created_at": {"$gte": after}}
+    coll = db.analytics_events
+
+    # --- Visitors timeline (unique visitor_id per day) ---
+    daily_pipeline = [
+        {"$match": match},
+        {
+            "$group": {
+                "_id": {
+                    "day": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+                    "visitor": "$visitor_id",
+                },
+            }
+        },
+        {"$group": {"_id": "$_id.day", "uniques": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+    daily = await coll.aggregate(daily_pipeline).to_list(200)
+
+    # --- Today, week, month uniques ---
+    today_start = datetime.combine(today_paris(), datetime.min.time(), tzinfo=PARIS_TZ).astimezone(timezone.utc)
+    week_start = datetime.now(timezone.utc) - timedelta(days=7)
+    month_start = datetime.now(timezone.utc) - timedelta(days=30)
+
+    async def unique_count(after_dt: datetime) -> int:
+        res = await coll.aggregate([
+            {"$match": {"created_at": {"$gte": after_dt}}},
+            {"$group": {"_id": "$visitor_id"}},
+            {"$count": "total"},
+        ]).to_list(1)
+        return res[0]["total"] if res else 0
+
+    visitors = {
+        "today": await unique_count(today_start),
+        "week": await unique_count(week_start),
+        "month": await unique_count(month_start),
+    }
+
+    # --- Top entries (by view_entry events) ---
+    top_views_p = [
+        {"$match": {**match, "name": "view_entry", "entry_id": {"$ne": None}}},
+        {"$group": {"_id": "$entry_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    top_views_raw = await coll.aggregate(top_views_p).to_list(20)
+    entry_ids = [r["_id"] for r in top_views_raw]
+    entries_idx = {e["id"]: e async for e in coll.database.entries.find({"id": {"$in": entry_ids}}, {"_id": 0, "id": 1, "title": 1, "type": 1, "date": 1})}
+    top_views = [
+        {
+            "entry_id": r["_id"],
+            "count": r["count"],
+            "title": entries_idx.get(r["_id"], {}).get("title", "?"),
+            "type": entries_idx.get(r["_id"], {}).get("type", "?"),
+            "date": entries_idx.get(r["_id"], {}).get("date", ""),
+        }
+        for r in top_views_raw
+    ]
+
+    # --- Top tickets (click_ticket) ---
+    top_tickets_p = [
+        {"$match": {**match, "name": "click_ticket", "entry_id": {"$ne": None}}},
+        {"$group": {"_id": "$entry_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    top_tickets_raw = await coll.aggregate(top_tickets_p).to_list(20)
+    ticket_ids = [r["_id"] for r in top_tickets_raw]
+    tickets_idx = {e["id"]: e async for e in coll.database.entries.find({"id": {"$in": ticket_ids}}, {"_id": 0, "id": 1, "title": 1, "type": 1})}
+    top_tickets = [
+        {
+            "entry_id": r["_id"],
+            "count": r["count"],
+            "title": tickets_idx.get(r["_id"], {}).get("title", "?"),
+            "type": tickets_idx.get(r["_id"], {}).get("type", "?"),
+        }
+        for r in top_tickets_raw
+    ]
+
+    # --- Top artists (click_artist) ---
+    top_artists_p = [
+        {"$match": {**match, "name": "click_artist", "teacher_id": {"$ne": None}}},
+        {"$group": {"_id": "$teacher_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5},
+    ]
+    top_artists_raw = await coll.aggregate(top_artists_p).to_list(20)
+    artist_ids = [r["_id"] for r in top_artists_raw]
+    artists_idx = {t["id"]: t async for t in coll.database.teachers.find({"id": {"$in": artist_ids}}, {"_id": 0, "id": 1, "name": 1})}
+    top_artists = [
+        {
+            "teacher_id": r["_id"],
+            "count": r["count"],
+            "name": artists_idx.get(r["_id"], {}).get("name", "?"),
+        }
+        for r in top_artists_raw
+    ]
+
+    # --- Top gallery events (photo_download + photo_tag) ---
+    top_gallery_p = [
+        {"$match": {**match, "name": {"$in": ["photo_download", "photo_tag"]}}},
+        {"$group": {"_id": "$event_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    top_gallery_raw = await coll.aggregate(top_gallery_p).to_list(20)
+
+    # --- Channel breakdown for shares ---
+    channels_p = [
+        {"$match": {**match, "name": "click_share"}},
+        {"$group": {"_id": "$channel", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    channels = await coll.aggregate(channels_p).to_list(50)
+
+    # --- Conversion: views → ticket clicks per entry ---
+    # Build a quick map for entries that have at least 1 view in period.
+    conversions = []
+    view_map = {r["_id"]: r["count"] for r in top_views_raw}
+    ticket_map = {r["_id"]: r["count"] for r in top_tickets_raw}
+    for eid in view_map:
+        v = view_map.get(eid, 0)
+        t = ticket_map.get(eid, 0)
+        if v > 0:
+            conversions.append({
+                "entry_id": eid,
+                "views": v,
+                "tickets": t,
+                "rate": round(t / v * 100, 1),
+                "title": entries_idx.get(eid, {}).get("title", "?"),
+            })
+    conversions.sort(key=lambda x: x["rate"], reverse=True)
+
+    # --- Featured (coup de cœur) performance ---
+    featured_pipeline = [
+        {"$match": {**match, "name": {"$in": ["click_featured", "click_ticket"]}}},
+        {"$group": {"_id": {"name": "$name", "entry_id": "$entry_id"}, "count": {"$sum": 1}}},
+    ]
+    featured_raw = await coll.aggregate(featured_pipeline).to_list(500)
+    featured_perf: dict = {}
+    for r in featured_raw:
+        eid = r["_id"]["entry_id"] or "_"
+        featured_perf.setdefault(eid, {"impressions": 0, "tickets": 0})
+        if r["_id"]["name"] == "click_featured":
+            featured_perf[eid]["impressions"] += r["count"]
+        elif r["_id"]["name"] == "click_ticket":
+            featured_perf[eid]["tickets"] += r["count"]
+
+    # Pull the entries that are still currently featured for context
+    cur_featured = await db.entries.find({"status": "featured"}, {"_id": 0, "id": 1, "title": 1}).to_list(50)
+    featured_summary = []
+    for e in cur_featured:
+        p = featured_perf.get(e["id"], {"impressions": 0, "tickets": 0})
+        rate = round((p["tickets"] / p["impressions"]) * 100, 1) if p["impressions"] > 0 else 0
+        featured_summary.append({
+            "entry_id": e["id"],
+            "title": e.get("title", "?"),
+            "impressions": p["impressions"],
+            "tickets": p["tickets"],
+            "rate": rate,
+        })
+    featured_summary.sort(key=lambda x: x["impressions"], reverse=True)
+
+    return {
+        "period": period,
+        "visitors": visitors,
+        "daily": [{"date": d["_id"], "uniques": d["uniques"]} for d in daily],
+        "top_views": top_views,
+        "top_tickets": top_tickets,
+        "top_artists": top_artists,
+        "top_gallery": top_gallery_raw,
+        "channels": [{"channel": c["_id"] or "(autre)", "count": c["count"]} for c in channels],
+        "conversions": conversions[:10],
+        "featured": featured_summary,
+    }
+
+
+# Re-include router so the analytics endpoints above are mounted
+app.include_router(api_router)
+
 
 app.add_middleware(
     CORSMiddleware,

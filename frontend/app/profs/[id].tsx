@@ -18,6 +18,7 @@ import { api, EntryItem, TeacherItem } from "../../src/api";
 import EntryCard from "../../src/EntryCard";
 import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
+import { track } from "../../src/analytics";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -45,6 +46,7 @@ export default function TeacherDetail() {
       ]);
       setTeacher(t);
       setWorkshops(ws);
+      track("click_artist", { teacher_id: t.id, extra: { name: t.name } });
     } catch (e) {
       console.log("teacher detail err", e);
     } finally {

@@ -25,6 +25,7 @@ import { api, EventItem, PhotoItem } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { useShareMenu } from "../../src/ShareMenu";
+import { track } from "../../src/analytics";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const GRID_GAP = 4;

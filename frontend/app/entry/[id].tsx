@@ -23,6 +23,7 @@ import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { formatDateFR, formatDateRangeFR } from "../../src/EntryCard";
 import { useShareMenu } from "../../src/ShareMenu";
+import { track } from "../../src/analytics";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -85,6 +86,18 @@ export default function EntryDetail() {
     try {
       const e = await api.getEntry(id);
       setEntry(e);
+      // Track entry view
+      track("view_entry", {
+        entry_id: e.id,
+        extra: {
+          title: e.title,
+          type: e.type,
+          featured: !!e.featured || e.status === "featured",
+        },
+      });
+      if (e.featured || e.status === "featured") {
+        track("click_featured", { entry_id: e.id, extra: { title: e.title } });
+      }
     } catch (err) {
       console.log("entry detail err", err);
     } finally {
@@ -102,6 +115,7 @@ export default function EntryDetail() {
       : `https://pcs.photos/entry/${id}`;
 
   const handleShare = () => {
+    if (entry) track("click_share", { entry_id: entry.id, channel: "menu" });
     triggerShare({
       title: entry?.title ?? "Paris Cuban Salsa",
       text: entry?.title
@@ -305,7 +319,10 @@ export default function EntryDetail() {
               <TouchableOpacity
                 testID="open-maps-venue"
                 style={styles.metaRow}
-                onPress={() => openLink(buildMapsUrl(entry.venue, entry.address))}
+                onPress={() => {
+                  track("click_address", { entry_id: entry.id });
+                  openLink(buildMapsUrl(entry.venue, entry.address));
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons name="business-outline" size={16} color={COLORS.primaryText} />
@@ -317,7 +334,10 @@ export default function EntryDetail() {
               <TouchableOpacity
                 testID="open-maps-address"
                 style={styles.metaRow}
-                onPress={() => openLink(buildMapsUrl(entry.venue, entry.address))}
+                onPress={() => {
+                  track("click_address", { entry_id: entry.id });
+                  openLink(buildMapsUrl(entry.venue, entry.address));
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons name="location-outline" size={16} color={COLORS.primaryText} />
