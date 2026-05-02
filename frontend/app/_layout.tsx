@@ -14,6 +14,7 @@ import {
 import { AuthProvider } from "../src/auth";
 import { COLORS } from "../src/theme";
 import { StatusBar } from "expo-status-bar";
+import PWAInstallBanner from "../src/PWAInstallBanner";
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -41,6 +42,7 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: COLORS.background },
         }}
       />
+      <PWAInstallBanner />
     </AuthProvider>
   );
 }
