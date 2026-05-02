@@ -59,9 +59,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profs"
         options={{
-          title: "Profs & Workshops",
+          title: "Artistes",
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="school-outline" color={color} focused={focused} />
+            <TabIcon name="people-outline" color={color} focused={focused} />
           ),
         }}
       />

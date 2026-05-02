@@ -71,7 +71,7 @@ export default function TeacherDetail() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loader}>
-          <Text style={styles.err}>Professeur introuvable.</Text>
+          <Text style={styles.err}>Artiste introuvable.</Text>
           <TouchableOpacity onPress={() => router.replace("/profs")}>
             <Text style={styles.backLink}>RETOUR</Text>
           </TouchableOpacity>
@@ -92,7 +92,7 @@ export default function TeacherDetail() {
         <TouchableOpacity onPress={() => router.back()} testID="back-btn">
           <Ionicons name="arrow-back" size={20} color={COLORS.primaryText} />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>FICHE PROF</Text>
+        <Text style={styles.topTitle}>FICHE ARTISTE</Text>
         <View style={{ width: 20 }} />
       </View>
 
@@ -120,7 +120,7 @@ export default function TeacherDetail() {
         )}
 
         <View style={styles.body}>
-          <Text style={styles.overline}>PROFESSEUR DE SALSA CUBAINE</Text>
+          <Text style={styles.overline}>ARTISTE — SCÈNE CUBAINE PARISIENNE</Text>
           <Text style={styles.name}>{teacher.name}</Text>
 
           {styles_dance.length > 0 && (
@@ -205,11 +205,11 @@ export default function TeacherDetail() {
           ))}
 
           <View style={styles.proposeWrap}>
-            <Text style={styles.proposeOverline}>VOUS ÊTES CE PROF ?</Text>
+            <Text style={styles.proposeOverline}>VOUS ÊTES CET ARTISTE ?</Text>
             <Text style={styles.proposeTitle}>Proposez votre prochain workshop</Text>
             <Text style={styles.proposeSub}>
               Soumettez la fiche de votre stage. Notre équipe valide les contenus
-              avant publication, sauf si vous êtes profs vérifié.
+              avant publication, sauf si vous êtes artiste vérifié.
             </Text>
             <SubmitEntryButton type="workshop" presetTeacherId={teacher.id} />
           </View>

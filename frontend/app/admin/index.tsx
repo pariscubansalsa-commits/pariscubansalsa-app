@@ -25,8 +25,8 @@ export default function AdminDashboard() {
     },
     {
       key: "teachers",
-      title: "Professeurs",
-      desc: "Fiches profs, bios, photos, réseaux sociaux",
+      title: "Artistes",
+      desc: "Fiches artistes, bios, photos, styles, réseaux sociaux",
       icon: "people-outline" as const,
       path: "/admin/teachers",
     },

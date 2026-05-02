@@ -243,7 +243,7 @@ export default function SubmitEntryButton({
                             color={COLORS.primaryText}
                           />
                           <Text style={styles.lockedTeacherTxt}>
-                            Ce workshop sera rattaché à cette fiche prof.
+                            Ce workshop sera rattaché à cette fiche artiste.
                           </Text>
                         </View>
                       )}

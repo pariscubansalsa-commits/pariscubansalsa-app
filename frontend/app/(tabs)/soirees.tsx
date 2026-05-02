@@ -8,7 +8,7 @@ export default function Soirees() {
   return (
     <EntriesScreen
       type="soiree"
-      overline="SOIRÉES RÉCURRENTES"
+      overline="SOIRÉES & CONCERTS"
       headline={
         <>
           Nos{" "}
@@ -19,11 +19,11 @@ export default function Soirees() {
               color: COLORS.accentYellow,
             }}
           >
-            soirées.
+            soirées & concerts.
           </Text>
         </>
       }
-      subtitle="Les rendez-vous mensuels incontournables — Callesol, Cabeza Loca, CUBAILA & Cie."
+      subtitle="Les rendez-vous mensuels et concerts live de la scène cubaine parisienne — Callesol, Cabeza Loca, CUBAILA & Cie."
       headerExtra={<SubmitEntryButton type="soiree" />}
     />
   );

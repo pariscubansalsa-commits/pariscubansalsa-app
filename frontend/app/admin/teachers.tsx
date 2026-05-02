@@ -138,7 +138,7 @@ export default function AdminTeachers() {
     if (!token) return;
     const ok =
       Platform.OS === "web"
-        ? window.confirm("Supprimer ce professeur ?")
+        ? window.confirm("Supprimer cet artiste ?")
         : await new Promise<boolean>((r) =>
             Alert.alert("Supprimer ?", "", [
               { text: "Annuler", onPress: () => r(false) },
@@ -172,7 +172,7 @@ export default function AdminTeachers() {
       ) : (
         <ScrollView contentContainerStyle={{ padding: SPACING.screen, paddingBottom: 40 }}>
           {teachers.length === 0 && (
-            <Text style={styles.emptyTxt}>Aucun professeur pour l&apos;instant.</Text>
+            <Text style={styles.emptyTxt}>Aucun artiste pour l&apos;instant.</Text>
           )}
           {teachers.map((t) => (
             <View key={t.id} style={styles.row}>
@@ -215,7 +215,7 @@ export default function AdminTeachers() {
             <View style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>
-                  {editing ? "Modifier" : "Nouveau professeur"}
+                  {editing ? "Modifier" : "Nouvel artiste"}
                 </Text>
                 <TouchableOpacity onPress={() => setModalOpen(false)}>
                   <Ionicons name="close" size={22} color={COLORS.primaryText} />
@@ -311,9 +311,9 @@ export default function AdminTeachers() {
                     }
                   />
                   <View>
-                    <Text style={styles.trustTitle}>Prof vérifié</Text>
+                    <Text style={styles.trustTitle}>Artiste vérifié</Text>
                     <Text style={styles.trustSub}>
-                      Les workshops de ce prof sont publiés sans validation manuelle.
+                      Les workshops de cet artiste sont publiés sans validation manuelle.
                     </Text>
                   </View>
                 </View>
