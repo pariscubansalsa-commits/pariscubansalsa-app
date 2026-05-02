@@ -216,6 +216,107 @@ frontend:
         - working: "NA"
           agent: "main"
           comment: "Fixed corrupted styles file. Added presetTeacherId prop: when provided the teacher chip selector is hidden and the locked teacher banner appears."
+
+backend:
+  - task: "Google Calendar sync — pending queue"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added a background loop that polls the GOOGLE_CALENDAR_ICAL_URL every
+            GCAL_SYNC_INTERVAL_SECONDS (default 900) and upserts events into the
+            entries collection with source='gcal', external_id=ical UID,
+            status='pending'. Existing entries are matched by external_id; if
+            content changed, status is reset to 'pending' for re-validation;
+            already 'rejected' entries are skipped to avoid resurrecting them.
+            Manual trigger: POST /api/calendar/sync (admin only).
+        - working: true
+          agent: "testing"
+          comment: |
+            Verified end-to-end against https://rhythm-frames-3.preview.emergentagent.com/api.
+            - POST /api/calendar/sync without admin -> 401 'Admin authentication required'.
+            - POST /api/calendar/sync as admin -> 200 {ok:true, created:0, updated:0,
+              unchanged:31, skipped:0}; total (created+updated+unchanged)=31 (>0).
+              All four counters are non-negative ints, schema matches expectation.
+            - GET /api/entries?status=pending (admin) returns 31 entries, all with
+              source='gcal' and external_id populated (sample external_id is iCal UID).
+            - Reject-then-resync invariant: rejected one gcal entry, re-ran sync ->
+              {created:0, updated:0, unchanged:30, skipped:1}. The same external_id
+              now has zero pending docs and one rejected doc; sync did NOT resurrect it.
+            - GET /api/entries?status=rejected (admin) includes the rejected gcal entry.
+
+  - task: "Reject endpoint now archives instead of deleting"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            POST /api/entries/{id}/reject now sets status='rejected' instead of
+            deleting the row. GET /api/entries?status=rejected (admin) returns
+            the archived list.
+        - working: true
+          agent: "testing"
+          comment: |
+            Verified. Created pending workshop via POST /api/entries/submit (no
+            teacher_id), then:
+            - POST /api/entries/{id}/reject without admin -> 401.
+            - POST /api/entries/{id}/reject with admin Bearer test_session_pcs_admin_000
+              -> 200 {ok:true, id:<uuid>, status:'rejected'}.
+            - GET /api/entries/{id} -> 200 with status='rejected' (entry is archived,
+              NOT deleted; previous behaviour was 404). All assertions pass.
+
+  - task: "Approve endpoint accepts type query param"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            POST /api/entries/{id}/approve?type=soiree|workshop|festival|agenda
+            allows admin to reclassify an entry's type at validation time.
+        - working: true
+          agent: "testing"
+          comment: |
+            Verified. Pending workshop submitted with type='workshop':
+            - POST /api/entries/{id}/approve?type=festival (admin) -> 200, response
+              has type='festival' and status='approved' (reclassification works).
+            - POST /api/entries/{id}/approve?type=invalid (admin) -> 400
+              {"detail":"Invalid type"}.
+            Regression: POST /api/entries/{id}/feature on a manually approved entry
+            returns 200 with status='featured' and featured=true.
+            GET /api/calendar/events still returns the raw iCal list (count=31).
+            GET /api/entries?type=workshop returns only approved+featured (no
+            pending/rejected leaks).
+
+agent_communication:
+    - agent: "main"
+      message: |
+        Please test the new Google Calendar pipeline:
+        1) GET /api/entries?status=pending should include source='gcal' entries.
+        2) POST /api/calendar/sync (admin) returns {ok, created, updated, unchanged, skipped}.
+        3) POST /api/entries/{id}/approve?type=soiree on a gcal-pending entry
+           should set status=approved + type=soiree.
+        4) POST /api/entries/{id}/reject sets status=rejected (not deleted).
+        5) GET /api/entries?status=rejected (admin) returns the archived list.
+        6) Re-running sync_gcal_to_pending after a reject must NOT re-create the
+           rejected entry.
+        Auth: see /app/memory/test_credentials.md.
+
         - working: true
           agent: "testing"
           comment: "Verified end-to-end. Tapping 'PROPOSER UN WORKSHOP' on Lorenys profile opens modal sheet with title 'Proposer un workshop'. The teacher chip selector (FICHE PROF optional) is HIDDEN as expected. Yellow locked banner 'Ce workshop sera rattaché à cette fiche prof.' is shown. Filled and submitted form (Test Workshop E2E / 2026-09-15 / Intermédiaire / Salsa cubaine / 60€ / Tester E2E / tester-e2e@example.com) -> success screen 'Merci !' with checkmark appeared. After reload, 'Test Workshop E2E' appears on Lorenys profile (auto-approved via trusted_teacher flag). All 5 scenarios PASSED."
@@ -316,3 +417,49 @@ agent_communication:
         4. S3 OBINISA presence is most likely a featured-workshop title; if Artistes page currently renders the workshop carousel below the grid, no fix needed. Otherwise inspect filter logic.
         
         Overall: Rename rollout looks correct. 5 of 7 scenarios fully PASS, 1 likely-pass (filter false-negative from string match), 1 not-verified-by-automation (no testid).
+
+    - agent: "testing"
+      message: |
+        ## Backend regression — GCal sync + admin moderation queue
+
+        Test suite: /app/backend_test.py against
+        https://rhythm-frames-3.preview.emergentagent.com/api with admin Bearer
+        token test_session_pcs_admin_000. ALL 16 ASSERTIONS PASSED (0 failures).
+
+        ### A. Reject endpoint archives instead of deleting — PASS (4/4)
+          - submit pending workshop -> id ok
+          - reject without admin -> 401
+          - reject with admin -> 200 {ok:true,id,status:'rejected'}
+          - GET /api/entries/{id} after reject -> 200 status='rejected' (NOT 404,
+            confirming archival behaviour)
+
+        ### B. Approve accepts type query param — PASS (3/3)
+          - approve?type=invalid -> 400 'Invalid type'
+          - approve?type=festival -> 200 type='festival', status='approved'
+          - submission of type=workshop reclassified to festival successfully
+
+        ### C. Google Calendar sync pipeline — PASS (6/6)
+          - POST /api/calendar/sync without admin -> 401
+          - POST /api/calendar/sync as admin -> 200
+            {ok:true, created:0, updated:0, unchanged:31, skipped:0};
+            total (created+updated+unchanged) = 31 (>0 ✔). All counters non-negative ints.
+          - GET /api/entries?status=pending (admin) -> 31 entries, all
+            source='gcal', external_id populated.
+          - Reject one gcal entry, re-run sync -> {created:0, updated:0,
+            unchanged:30, skipped:1}. The same external_id has 0 pending and 1
+            rejected — sync did NOT resurrect it. Rejected entry left in DB
+            (per cleanup instructions; gcal entries not deleted).
+          - GET /api/entries?status=rejected (admin) includes the rejected gcal entry.
+
+        ### D. Regression — PASS (3/3)
+          - GET /api/calendar/events -> 200, list of 31 iCal events.
+          - GET /api/entries?type=workshop -> only approved+featured (no leaks).
+          - POST /api/entries/{id}/feature on approved entry -> status='featured',
+            featured=true.
+
+        Cleanup: deleted the 3 manual test entries (sections A, B, D). The single
+        gcal entry rejected during section C is intentionally left archived so
+        the moderation queue stays consistent — and the next sync correctly
+        skips it instead of resurrecting it.
+
+        No blockers. Backend is fully working. Test script: /app/backend_test.py.

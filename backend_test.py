@@ -1,409 +1,401 @@
 """
-Backend test suite for Paris Cuban Salsa - Profs & Workshops merge.
-Tests the new endpoints and verifies regression of existing ones.
+Backend test for Paris Cuban Salsa — Google Calendar sync + admin moderation queue.
+
+Coverage:
+  A. Reject endpoint now archives instead of deleting.
+  B. Approve endpoint accepts type query param.
+  C. Google Calendar sync pipeline.
+  D. Regression: /calendar/events, /entries?type=workshop, feature endpoint.
+
+Auth: Bearer test_session_pcs_admin_000  (see /app/memory/test_credentials.md)
+URL : EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env  (+ /api prefix)
 """
+
+from __future__ import annotations
+
+import json
 import os
 import sys
-import json
-import requests
-from typing import Optional
+from typing import Any, Optional
 
-# Resolve BACKEND URL from frontend/.env (EXPO_PUBLIC_BACKEND_URL)
-def get_backend_url() -> str:
-    env_path = "/app/frontend/.env"
-    with open(env_path, "r") as f:
-        for line in f:
+import requests
+
+# ---------- Config ----------
+
+FRONT_ENV = "/app/frontend/.env"
+
+
+def load_backend_url() -> str:
+    with open(FRONT_ENV) as fh:
+        for line in fh:
             line = line.strip()
             if line.startswith("EXPO_PUBLIC_BACKEND_URL="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+                return line.split("=", 1)[1].strip().strip('"')
     raise RuntimeError("EXPO_PUBLIC_BACKEND_URL not found in frontend/.env")
 
 
-BASE = get_backend_url().rstrip("/") + "/api"
+BASE = load_backend_url().rstrip("/") + "/api"
 ADMIN_TOKEN = "test_session_pcs_admin_000"
-ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}", "Content-Type": "application/json"}
-PUBLIC_HEADERS = {"Content-Type": "application/json"}
+ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
-results = []  # list of dicts: name, status, http, sample, detail
-
-
-def record(name: str, ok: bool, http: Optional[int], sample, detail: str = ""):
-    results.append({
-        "name": name,
-        "ok": ok,
-        "http": http,
-        "sample": sample,
-        "detail": detail,
-    })
-    icon = "PASS" if ok else "FAIL"
-    print(f"[{icon}] {name} | http={http} | {detail}")
-    if sample is not None:
-        try:
-            s = json.dumps(sample, default=str)
-        except Exception:
-            s = str(sample)
-        if len(s) > 400:
-            s = s[:400] + "..."
-        print(f"     sample: {s}")
+print(f"BASE URL: {BASE}\n")
 
 
-# Track resources for cleanup
-created_teacher_ids = []
-created_entry_ids = []
+# ---------- Result tracking ----------
+
+results: list[tuple[str, bool, str]] = []
 
 
-def cleanup():
-    print("\n=== CLEANUP ===")
-    for eid in created_entry_ids:
-        try:
-            r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=15)
-            print(f"  delete entry {eid}: {r.status_code}")
-        except Exception as e:
-            print(f"  delete entry {eid} failed: {e}")
-    for tid in created_teacher_ids:
-        try:
-            r = requests.delete(f"{BASE}/teachers/{tid}", headers=ADMIN_HEADERS, timeout=15)
-            print(f"  delete teacher {tid}: {r.status_code}")
-        except Exception as e:
-            print(f"  delete teacher {tid} failed: {e}")
+def log(name: str, ok: bool, details: str = "") -> None:
+    tag = "PASS" if ok else "FAIL"
+    print(f"[{tag}] {name}")
+    if details:
+        print(f"       {details}")
+    results.append((name, ok, details))
 
 
-def main():
-    print(f"BASE = {BASE}")
-    print(f"ADMIN_TOKEN = {ADMIN_TOKEN[:12]}...")
+def trim(obj: Any, length: int = 220) -> str:
+    try:
+        s = json.dumps(obj, default=str)
+    except Exception:
+        s = str(obj)
+    return s if len(s) <= length else s[:length] + "..."
 
-    # ---- Sanity: admin auth check ----
-    r = requests.get(f"{BASE}/auth/me", headers=ADMIN_HEADERS, timeout=15)
-    if r.status_code != 200:
-        record("auth/me admin precheck", False, r.status_code, r.text[:300],
-               "Admin token not valid; tests will be unreliable")
-    else:
-        me = r.json()
-        record("auth/me admin precheck", me.get("is_admin") is True, r.status_code, me,
-               f"is_admin={me.get('is_admin')}")
 
-    # =======================================================================
-    # 1. REJECT ENDPOINT
-    # =======================================================================
-    print("\n=== 1. REJECT ENDPOINT ===")
+# ---------- Helpers ----------
 
-    # 1a. Submit a pending workshop (no teacher_id => default pending)
-    submit_payload = {
+manual_entry_ids: list[str] = []  # for cleanup
+
+
+def submit_pending_workshop(title: str, date_str: str = "2026-10-12") -> Optional[str]:
+    payload = {
         "type": "workshop",
-        "title": "Rumba Columbia masterclass — test reject",
-        "date": "2026-03-15",
-        "time": "19:00",
-        "venue": "Studio Harmonic",
-        "address": "5 passage des Taillandiers, 75011 Paris",
-        "description": "Workshop technique de rumba columbia",
-        "instructor": "Yoannis Tamayo",
+        "title": title,
+        "date": date_str,
+        "time": "19:00 - 21:00",
+        "venue": "Studio Test PCS",
+        "address": "10 rue de Test, Paris",
+        "description": "Atelier de test pour pipeline de modération.",
+        "instructor": "Manolo Test",
         "level": "intermediate",
-        "price": "30€",
-        "category": "rumba",
-        "submitter_name": "Lucia Fernandez",
-        "submitter_email": "lucia.fernandez@example.com",
+        "price": "20€",
+        "category": "salsa",
+        "submitter_name": "Test Submitter",
+        "submitter_email": "submit-test@pcs.dev",
     }
-    r = requests.post(f"{BASE}/entries/submit", json=submit_payload, headers=PUBLIC_HEADERS, timeout=15)
+    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=15)
     if r.status_code != 200:
-        record("submit pending workshop (no teacher_id)", False, r.status_code, r.text[:400], "submit failed")
-        cleanup()
+        return None
+    body = r.json()
+    return body.get("id")
+
+
+# ---------- A. Reject archives ----------
+
+def section_A():
+    print("\n=== SECTION A: Reject archives instead of deleting ===")
+
+    # A.1 create pending submission
+    eid = submit_pending_workshop("[TEST-A] Workshop reject archive")
+    if not eid:
+        log("A.1 submit pending workshop", False, "submit failed")
         return
-    pending_entry = r.json()
-    pending_id = pending_entry["id"]
-    is_pending = pending_entry.get("status") == "pending"
-    record("submit pending workshop (no teacher_id)", is_pending, r.status_code, pending_entry,
-           f"status={pending_entry.get('status')} (expected pending)")
+    manual_entry_ids.append(eid)
+    log("A.1 submit pending workshop", True, f"id={eid}")
 
-    # 1b. Reject without admin token -> 401
-    r = requests.post(f"{BASE}/entries/{pending_id}/reject", headers=PUBLIC_HEADERS, timeout=15)
-    record("reject WITHOUT admin returns 401", r.status_code == 401, r.status_code,
-           r.text[:200], f"got {r.status_code}, expected 401")
+    # A.4 (do this first so we still have pending) — reject without admin -> 401
+    r = requests.post(f"{BASE}/entries/{eid}/reject", timeout=15)
+    log(
+        "A.4 reject without admin -> 401",
+        r.status_code == 401,
+        f"status={r.status_code} body={trim(r.text)}",
+    )
 
-    # 1c. Reject with admin -> 200 {ok:true,id}
-    r = requests.post(f"{BASE}/entries/{pending_id}/reject", headers=ADMIN_HEADERS, timeout=15)
+    # A.2 reject with admin
+    r = requests.post(f"{BASE}/entries/{eid}/reject", headers=ADMIN_HEADERS, timeout=15)
     body = None
     try:
         body = r.json()
     except Exception:
-        body = r.text
-    ok = r.status_code == 200 and isinstance(body, dict) and body.get("ok") is True and body.get("id") == pending_id
-    record("reject WITH admin returns 200 {ok,id}", ok, r.status_code, body, "")
+        pass
+    ok = (
+        r.status_code == 200
+        and isinstance(body, dict)
+        and body.get("ok") is True
+        and body.get("id") == eid
+        and body.get("status") == "rejected"
+    )
+    log("A.2 reject with admin returns ok+status=rejected", ok, f"status={r.status_code} body={trim(body)}")
 
-    # 1d. GET on rejected entry -> 404
-    r = requests.get(f"{BASE}/entries/{pending_id}", timeout=15)
-    record("GET rejected entry returns 404 (deleted)", r.status_code == 404, r.status_code,
-           r.text[:200], "")
+    # A.3 GET still returns the entry with status=rejected (NOT 404)
+    r = requests.get(f"{BASE}/entries/{eid}", timeout=15)
+    body = None
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    ok = (
+        r.status_code == 200
+        and isinstance(body, dict)
+        and body.get("status") == "rejected"
+        and body.get("id") == eid
+    )
+    log(
+        "A.3 GET rejected entry still returns it (status=rejected, not 404)",
+        ok,
+        f"status={r.status_code} body={trim(body)}",
+    )
 
-    # =======================================================================
-    # 2. TEACHER dance_styles FIELD
-    # =======================================================================
-    print("\n=== 2. TEACHER dance_styles FIELD ===")
 
-    teacher_payload = {
-        "name": "Yoel Marrero",
-        "bio": "Maître de rumba et son cubain, basé à Paris depuis 2015.",
-        "dance_styles": ["Salsa cubaine", "Rumba"],
-        "instagram": "@yoelmarrero",
-    }
-    r = requests.post(f"{BASE}/teachers", json=teacher_payload, headers=ADMIN_HEADERS, timeout=15)
-    if r.status_code != 200:
-        record("POST /teachers with dance_styles", False, r.status_code, r.text[:400], "create failed")
-        cleanup()
+# ---------- B. Approve type query param ----------
+
+def section_B():
+    print("\n=== SECTION B: Approve endpoint accepts type query param ===")
+
+    eid = submit_pending_workshop("[TEST-B] Workshop reclassify festival")
+    if not eid:
+        log("B.1 submit pending workshop", False, "submit failed")
         return
-    t1 = r.json()
-    t1_id = t1["id"]
-    created_teacher_ids.append(t1_id)
-    ds_match = t1.get("dance_styles") == ["Salsa cubaine", "Rumba"]
-    record("POST /teachers with dance_styles", ds_match, r.status_code, t1,
-           f"dance_styles={t1.get('dance_styles')}")
+    manual_entry_ids.append(eid)
+    log("B.1 submit pending workshop (type=workshop)", True, f"id={eid}")
 
-    # GET single teacher
-    r = requests.get(f"{BASE}/teachers/{t1_id}", timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    ds_get_match = isinstance(body, dict) and body.get("dance_styles") == ["Salsa cubaine", "Rumba"]
-    record("GET /teachers/{id} returns dance_styles", ds_get_match, r.status_code, body, "")
-
-    # PUT update dance_styles
-    update_payload = {
-        "name": "Yoel Marrero",
-        "bio": "Maître de rumba et son cubain, basé à Paris depuis 2015.",
-        "dance_styles": ["Son", "Rueda de casino", "Afro-cubain"],
-        "instagram": "@yoelmarrero",
-    }
-    r = requests.put(f"{BASE}/teachers/{t1_id}", json=update_payload, headers=ADMIN_HEADERS, timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    ds_put_match = (isinstance(body, dict)
-                    and body.get("dance_styles") == ["Son", "Rueda de casino", "Afro-cubain"])
-    record("PUT /teachers/{id} updates dance_styles", ds_put_match, r.status_code, body, "")
-
-    # =======================================================================
-    # 3. trusted_teacher AUTO-APPROVE WORKSHOP
-    # =======================================================================
-    print("\n=== 3. trusted_teacher AUTO-APPROVE WORKSHOP ===")
-
-    # 3a. Trusted teacher
-    trusted_payload = {
-        "name": "Adriana Alvarez",
-        "bio": "Profesora vérifiée, casino & rueda.",
-        "dance_styles": ["Salsa cubaine", "Rueda de casino"],
-        "trusted_teacher": True,
-    }
-    r = requests.post(f"{BASE}/teachers", json=trusted_payload, headers=ADMIN_HEADERS, timeout=15)
-    trusted_t = r.json()
-    trusted_id = trusted_t["id"]
-    created_teacher_ids.append(trusted_id)
-    record("create trusted teacher", trusted_t.get("trusted_teacher") is True, r.status_code, trusted_t, "")
-
-    # Submit workshop with that teacher_id
-    sub_trusted = {
-        "type": "workshop",
-        "title": "Casino fundamentals avec Adriana",
-        "date": "2026-04-10",
-        "time": "18:30",
-        "venue": "La Chapelle des Lombards",
-        "address": "19 rue de Lappe, 75011 Paris",
-        "description": "Workshop casino tous niveaux",
-        "instructor": "Adriana Alvarez",
-        "teacher_id": trusted_id,
-        "level": "beginner",
-        "category": "salsa",
-        "submitter_name": "Adriana Alvarez",
-        "submitter_email": "adriana@example.com",
-    }
-    r = requests.post(f"{BASE}/entries/submit", json=sub_trusted, headers=PUBLIC_HEADERS, timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    if isinstance(body, dict) and body.get("id"):
-        created_entry_ids.append(body["id"])
-        trusted_workshop_id = body["id"]
-    else:
-        trusted_workshop_id = None
-    auto_approved = isinstance(body, dict) and body.get("status") == "approved"
-    record("submit workshop with trusted teacher_id => status=approved",
-           auto_approved, r.status_code, body, f"status={body.get('status') if isinstance(body, dict) else 'N/A'}")
-
-    # 3b. Untrusted teacher (default trusted_teacher=False)
-    untrusted_payload = {
-        "name": "Carlos Mendez",
-        "bio": "Nouveau prof, pas encore vérifié.",
-        "dance_styles": ["Salsa cubaine"],
-        # trusted_teacher omitted -> default False
-    }
-    r = requests.post(f"{BASE}/teachers", json=untrusted_payload, headers=ADMIN_HEADERS, timeout=15)
-    untrusted_t = r.json()
-    untrusted_id = untrusted_t["id"]
-    created_teacher_ids.append(untrusted_id)
-    record("create untrusted teacher (default trusted=false)",
-           untrusted_t.get("trusted_teacher") is False, r.status_code, untrusted_t, "")
-
-    sub_untrusted = {
-        "type": "workshop",
-        "title": "Salsa cubaine débutants — Carlos",
-        "date": "2026-04-12",
-        "time": "20:00",
-        "venue": "Studio Body Form",
-        "description": "Workshop débutants",
-        "instructor": "Carlos Mendez",
-        "teacher_id": untrusted_id,
-        "level": "beginner",
-        "category": "salsa",
-        "submitter_name": "Carlos Mendez",
-        "submitter_email": "carlos@example.com",
-    }
-    r = requests.post(f"{BASE}/entries/submit", json=sub_untrusted, headers=PUBLIC_HEADERS, timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    if isinstance(body, dict) and body.get("id"):
-        created_entry_ids.append(body["id"])
-        untrusted_workshop_id = body["id"]
-    else:
-        untrusted_workshop_id = None
-    is_pending = isinstance(body, dict) and body.get("status") == "pending"
-    record("submit workshop with untrusted teacher_id => status=pending",
-           is_pending, r.status_code, body, f"status={body.get('status') if isinstance(body, dict) else 'N/A'}")
-
-    # =======================================================================
-    # 4. GET /api/teachers/{id}/workshops
-    # =======================================================================
-    print("\n=== 4. GET /teachers/{id}/workshops ===")
-
-    # 4a. Trusted teacher's approved workshop should be in list
-    r = requests.get(f"{BASE}/teachers/{trusted_id}/workshops", timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    contains = isinstance(body, list) and any(
-        w.get("id") == trusted_workshop_id for w in body
+    # B.3 invalid type first (so we don't approve before)
+    r = requests.post(
+        f"{BASE}/entries/{eid}/approve",
+        params={"type": "invalid"},
+        headers=ADMIN_HEADERS,
+        timeout=15,
     )
-    record("GET trusted teacher workshops includes approved workshop",
-           contains, r.status_code, body[:3] if isinstance(body, list) else body, "")
-
-    # Add a SECOND approved workshop for the trusted teacher (so we can verify ordering)
-    sub2 = {
-        "type": "workshop",
-        "title": "Casino intermédiaire — Adriana 2",
-        "date": "2026-04-05",  # earlier than the first one
-        "venue": "Salle 2",
-        "instructor": "Adriana Alvarez",
-        "teacher_id": trusted_id,
-        "submitter_name": "Adriana Alvarez",
-        "submitter_email": "adriana@example.com",
-    }
-    r = requests.post(f"{BASE}/entries/submit", json=sub2, headers=PUBLIC_HEADERS, timeout=15)
-    second_workshop = r.json() if r.status_code == 200 else None
-    if second_workshop and second_workshop.get("id"):
-        created_entry_ids.append(second_workshop["id"])
-
-    # 4b. Feature the FIRST workshop (which has later date) → it should appear FIRST
-    if trusted_workshop_id:
-        r = requests.post(f"{BASE}/entries/{trusted_workshop_id}/feature",
-                          headers=ADMIN_HEADERS, timeout=15)
-        body = r.json() if r.status_code == 200 else r.text
-        is_featured = isinstance(body, dict) and body.get("status") == "featured"
-        record("feature trusted workshop returns status=featured",
-               is_featured, r.status_code, body, "")
-
-    # 4c. Reload and verify featured one is first
-    r = requests.get(f"{BASE}/teachers/{trusted_id}/workshops", timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    if isinstance(body, list) and len(body) > 0:
-        first = body[0]
-        first_is_featured = first.get("status") == "featured" and first.get("id") == trusted_workshop_id
-        record("featured workshop appears first in teacher's list",
-               first_is_featured, r.status_code,
-               [{"id": w.get("id"), "status": w.get("status"), "date": w.get("date"), "title": w.get("title")} for w in body],
-               f"first.status={first.get('status')} first.id={first.get('id')}")
-    else:
-        record("featured workshop appears first in teacher's list",
-               False, r.status_code, body, "list empty or non-list")
-
-    # 4d. Verify only approved+featured returned (no pending, e.g. submit a pending one for trusted... but trusted auto-approves).
-    # So instead: untrusted teacher's pending workshop must NOT appear in untrusted_id workshops list.
-    r = requests.get(f"{BASE}/teachers/{untrusted_id}/workshops", timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    excludes_pending = isinstance(body, list) and not any(
-        w.get("status") == "pending" for w in body
-    ) and not any(w.get("id") == untrusted_workshop_id for w in body)
-    record("untrusted teacher's pending workshop NOT in workshops list",
-           excludes_pending, r.status_code,
-           body if isinstance(body, list) else body, "")
-
-    # =======================================================================
-    # 5. EXISTING ENDPOINTS REGRESSION
-    # =======================================================================
-    print("\n=== 5. REGRESSION CHECKS ===")
-
-    # 5a. GET /api/entries?type=workshop returns only approved+featured
-    r = requests.get(f"{BASE}/entries?type=workshop", timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    ok = isinstance(body, list) and all(
-        w.get("status") in ("approved", "featured") for w in body
+    log(
+        "B.3 approve?type=invalid -> 400",
+        r.status_code == 400,
+        f"status={r.status_code} body={trim(r.text)}",
     )
-    record("GET /entries?type=workshop returns only approved+featured",
-           ok, r.status_code,
-           [{"id": w.get("id"), "status": w.get("status")} for w in body[:5]] if isinstance(body, list) else body,
-           f"count={len(body) if isinstance(body, list) else 'N/A'}")
 
-    # Check our trusted featured workshop is in there, untrusted pending is NOT
-    if isinstance(body, list):
-        ids = {w.get("id") for w in body}
-        featured_present = trusted_workshop_id in ids
-        pending_absent = untrusted_workshop_id not in ids
-        record("workshop feed includes featured & excludes pending",
-               featured_present and pending_absent, 200, None,
-               f"featured_present={featured_present} pending_absent={pending_absent}")
-
-    # 5b. GET /api/calendar/events still works
-    r = requests.get(f"{BASE}/calendar/events", timeout=20)
-    is_list = r.status_code == 200 and isinstance(r.json(), list)
-    body = r.json() if r.status_code == 200 else r.text
-    record("GET /calendar/events still works",
-           is_list, r.status_code,
-           body[:1] if isinstance(body, list) else body,
-           f"count={len(body) if isinstance(body, list) else 'N/A'}")
-
-    # 5c. GET /api/entries?status=pending requires admin
-    r = requests.get(f"{BASE}/entries?status=pending", timeout=15)
-    record("GET /entries?status=pending without admin returns 401",
-           r.status_code == 401, r.status_code, r.text[:200], "")
-
-    r = requests.get(f"{BASE}/entries?status=pending", headers=ADMIN_HEADERS, timeout=15)
-    body = r.json() if r.status_code == 200 else r.text
-    is_admin_ok = r.status_code == 200 and isinstance(body, list) and all(
-        e.get("status") == "pending" for e in body
+    # B.2 approve with type=festival
+    r = requests.post(
+        f"{BASE}/entries/{eid}/approve",
+        params={"type": "festival"},
+        headers=ADMIN_HEADERS,
+        timeout=15,
     )
-    record("GET /entries?status=pending with admin returns pending list",
-           is_admin_ok, r.status_code,
-           [{"id": e.get("id"), "status": e.get("status"), "title": e.get("title")} for e in body[:3]] if isinstance(body, list) else body,
-           f"count={len(body) if isinstance(body, list) else 'N/A'}")
+    body = None
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    ok = (
+        r.status_code == 200
+        and isinstance(body, dict)
+        and body.get("type") == "festival"
+        and body.get("status") == "approved"
+        and body.get("id") == eid
+    )
+    log(
+        "B.2 approve?type=festival -> type=festival, status=approved",
+        ok,
+        f"status={r.status_code} body={trim(body)}",
+    )
 
-    # =======================================================================
-    # CLEANUP
-    # =======================================================================
+
+# ---------- C. Google Calendar sync pipeline ----------
+
+def section_C():
+    print("\n=== SECTION C: Google Calendar sync pipeline ===")
+
+    # C.5 unauth first (cheap)
+    r = requests.post(f"{BASE}/calendar/sync", timeout=30)
+    log(
+        "C.5 POST /calendar/sync without admin -> 401",
+        r.status_code == 401,
+        f"status={r.status_code} body={trim(r.text)}",
+    )
+
+    # C.1 admin sync
+    r = requests.post(f"{BASE}/calendar/sync", headers=ADMIN_HEADERS, timeout=60)
+    body = None
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    keys = ("ok", "created", "updated", "unchanged", "skipped")
+    ok_keys = isinstance(body, dict) and all(k in body for k in keys)
+    ok_ints = (
+        ok_keys
+        and all(isinstance(body[k], int) and body[k] >= 0 for k in ("created", "updated", "unchanged", "skipped"))
+        and body.get("ok") is True
+    )
+    total_visible = (body.get("created", 0) + body.get("updated", 0) + body.get("unchanged", 0)) if isinstance(body, dict) else 0
+    ok_total = total_visible > 0
+    ok = r.status_code == 200 and ok_ints and ok_total
+    log(
+        "C.1 admin /calendar/sync returns {ok,created,updated,unchanged,skipped} ints; total>0",
+        ok,
+        f"status={r.status_code} body={trim(body)} totalCUU={total_visible}",
+    )
+
+    # C.2 GET pending entries -> some have source=gcal and external_id
+    r = requests.get(
+        f"{BASE}/entries",
+        params={"status": "pending"},
+        headers=ADMIN_HEADERS,
+        timeout=30,
+    )
+    pending = r.json() if r.status_code == 200 else []
+    gcal_pending = [e for e in pending if e.get("source") == "gcal" and e.get("external_id")]
+    log(
+        "C.2 admin GET /entries?status=pending has gcal entries with external_id",
+        r.status_code == 200 and len(gcal_pending) > 0,
+        f"status={r.status_code} pending_total={len(pending)} gcal_pending={len(gcal_pending)} sample={trim(gcal_pending[0] if gcal_pending else None)}",
+    )
+
+    if not gcal_pending:
+        log("C.3 reject gcal entry + re-sync skip", False, "no gcal pending entry available")
+        log("C.4 GET /entries?status=rejected includes rejected gcal", False, "no gcal pending entry available")
+        return
+
+    target = gcal_pending[0]
+    target_id = target["id"]
+    target_external = target["external_id"]
+
+    # C.3a reject the gcal entry
+    r = requests.post(f"{BASE}/entries/{target_id}/reject", headers=ADMIN_HEADERS, timeout=15)
+    rej_ok = r.status_code == 200 and r.json().get("status") == "rejected"
+    log(
+        "C.3a reject gcal pending entry",
+        rej_ok,
+        f"status={r.status_code} body={trim(r.text)}",
+    )
+
+    # C.3b re-run sync
+    r = requests.post(f"{BASE}/calendar/sync", headers=ADMIN_HEADERS, timeout=60)
+    body2 = r.json() if r.status_code == 200 else {}
+    skipped2 = body2.get("skipped", 0)
+    created2 = body2.get("created", 0)
+    # Re-fetch all gcal entries for that external_id; expect exactly 1 (the rejected one)
+    r2 = requests.get(
+        f"{BASE}/entries",
+        params={"status": "rejected"},
+        headers=ADMIN_HEADERS,
+        timeout=30,
+    )
+    rejected_list = r2.json() if r2.status_code == 200 else []
+    same_uid_rejected = [e for e in rejected_list if e.get("external_id") == target_external and e.get("source") == "gcal"]
+
+    # And ensure no NEW pending exists with same external_id
+    r3 = requests.get(
+        f"{BASE}/entries",
+        params={"status": "pending"},
+        headers=ADMIN_HEADERS,
+        timeout=30,
+    )
+    pending2 = r3.json() if r3.status_code == 200 else []
+    pending_same_uid = [e for e in pending2 if e.get("external_id") == target_external and e.get("source") == "gcal"]
+
+    ok = skipped2 >= 1 and len(pending_same_uid) == 0 and len(same_uid_rejected) >= 1
+    log(
+        "C.3b re-sync after reject: skipped>=1, no re-creation as pending",
+        ok,
+        f"sync_body={trim(body2)} pending_same_uid={len(pending_same_uid)} rejected_same_uid={len(same_uid_rejected)}",
+    )
+
+    # C.4 GET rejected list includes our rejected entry
+    log(
+        "C.4 admin GET /entries?status=rejected includes rejected gcal entry",
+        any(e.get("id") == target_id for e in rejected_list),
+        f"rejected_total={len(rejected_list)} contains_target={any(e.get('id') == target_id for e in rejected_list)}",
+    )
+
+
+# ---------- D. Regression ----------
+
+def section_D():
+    print("\n=== SECTION D: Regression ===")
+
+    # D.1 raw iCal payload
+    r = requests.get(f"{BASE}/calendar/events", timeout=30)
+    body = r.json() if r.status_code == 200 else None
+    ok = r.status_code == 200 and isinstance(body, list)
+    log(
+        "D.1 GET /calendar/events returns iCal list",
+        ok,
+        f"status={r.status_code} count={(len(body) if isinstance(body, list) else 'NA')}",
+    )
+
+    # D.2 workshops feed has only approved+featured (no rejected, no pending)
+    r = requests.get(f"{BASE}/entries", params={"type": "workshop"}, timeout=30)
+    items = r.json() if r.status_code == 200 else []
+    bad = [e for e in items if e.get("status") not in ("approved", "featured")]
+    log(
+        "D.2 GET /entries?type=workshop returns only approved+featured",
+        r.status_code == 200 and len(bad) == 0,
+        f"status={r.status_code} total={len(items)} non_approved={len(bad)}",
+    )
+
+    # D.3 feature an approved entry — submit one (use trusted teacher? simplest: create then approve)
+    eid = submit_pending_workshop("[TEST-D] Workshop feature regression", "2026-11-20")
+    if not eid:
+        log("D.3 feature endpoint regression", False, "submit failed")
+        return
+    manual_entry_ids.append(eid)
+
+    # approve first
+    r = requests.post(f"{BASE}/entries/{eid}/approve", headers=ADMIN_HEADERS, timeout=15)
+    if r.status_code != 200:
+        log("D.3 feature endpoint regression", False, f"approve failed status={r.status_code} body={trim(r.text)}")
+        return
+
+    # feature it
+    r = requests.post(f"{BASE}/entries/{eid}/feature", headers=ADMIN_HEADERS, timeout=15)
+    body = None
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    ok = (
+        r.status_code == 200
+        and isinstance(body, dict)
+        and body.get("status") == "featured"
+        and body.get("featured") is True
+    )
+    log(
+        "D.3 POST /entries/{id}/feature on approved -> status=featured",
+        ok,
+        f"status={r.status_code} body={trim(body)}",
+    )
+
+
+# ---------- Cleanup ----------
+
+def cleanup():
+    print("\n=== CLEANUP ===")
+    for eid in manual_entry_ids:
+        try:
+            r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=15)
+            print(f"  delete {eid} -> {r.status_code}")
+        except Exception as e:
+            print(f"  delete {eid} failed: {e}")
+
+
+# ---------- Run ----------
+
+def main() -> int:
+    section_A()
+    section_B()
+    section_C()
+    section_D()
     cleanup()
 
-    # Verify cleanup actually happened (sanity)
-    print("\n=== POST-CLEANUP VERIFY ===")
-    for tid in created_teacher_ids:
-        r = requests.get(f"{BASE}/teachers/{tid}", timeout=10)
-        print(f"  teacher {tid}: {r.status_code} (expect 404)")
-
-    # Final summary
     print("\n=== SUMMARY ===")
-    passed = sum(1 for r in results if r["ok"])
-    failed = sum(1 for r in results if not r["ok"])
-    print(f"PASSED: {passed} / {len(results)}")
-    print(f"FAILED: {failed}")
+    passed = sum(1 for _, ok, _ in results if ok)
+    failed = [r for r in results if not r[1]]
+    print(f"Passed: {passed}/{len(results)}")
     if failed:
-        print("\nFailed cases:")
-        for r in results:
-            if not r["ok"]:
-                print(f"  - {r['name']} (http={r['http']}) :: {r['detail']}")
-
-    sys.exit(0 if failed == 0 else 1)
+        print("Failed cases:")
+        for name, _, det in failed:
+            print(f"  - {name}: {det}")
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        cleanup()
-        sys.exit(2)
+    sys.exit(main())

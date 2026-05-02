@@ -51,9 +51,12 @@ export type EntryItem = {
   ticket_link?: string;
   cover_photo?: string | null;
   featured?: boolean;
-  status?: "pending" | "approved" | "featured";
+  status?: "pending" | "approved" | "featured" | "rejected";
   submitter_name?: string;
   submitter_email?: string;
+  source?: "manual" | "gcal" | "submission" | "organizer";
+  external_id?: string | null;
+  last_modified_at?: string | null;
   created_at?: string;
 };
 
@@ -184,19 +187,42 @@ export const api = {
       headers: authHeaders(token),
     }).then((r) => handle<EntryItem[]>(r)),
 
-  approveEntry: (token: string, id: string) =>
-    fetch(`${API}/entries/${id}/approve`, {
+  listRejectedEntries: (token: string) =>
+    fetch(`${API}/entries?status=rejected`, {
+      credentials: "include",
+      headers: authHeaders(token),
+    }).then((r) => handle<EntryItem[]>(r)),
+
+  approveEntry: (token: string, id: string, type?: EntryType) => {
+    const qs = type ? `?type=${encodeURIComponent(type)}` : "";
+    return fetch(`${API}/entries/${id}/approve${qs}`, {
       method: "POST",
       headers: authHeaders(token),
       credentials: "include",
-    }).then((r) => handle<EntryItem>(r)),
+    }).then((r) => handle<EntryItem>(r));
+  },
 
   rejectEntry: (token: string, id: string) =>
     fetch(`${API}/entries/${id}/reject`, {
       method: "POST",
       headers: authHeaders(token),
       credentials: "include",
-    }).then((r) => handle<{ ok: boolean; id: string }>(r)),
+    }).then((r) => handle<{ ok: boolean; id: string; status: string }>(r)),
+
+  syncCalendar: (token: string) =>
+    fetch(`${API}/calendar/sync`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) =>
+      handle<{
+        ok: boolean;
+        created: number;
+        updated: number;
+        unchanged: number;
+        skipped: number;
+      }>(r)
+    ),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>

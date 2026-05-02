@@ -22,12 +22,13 @@ import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
 
-const TYPES: { key: EntryType | "pending"; label: string }[] = [
+const TYPES: { key: EntryType | "pending" | "rejected"; label: string }[] = [
+  { key: "pending", label: "À valider" },
   { key: "agenda", label: "Agenda" },
   { key: "soiree", label: "Soirées" },
   { key: "workshop", label: "Workshops" },
   { key: "festival", label: "Festivals" },
-  { key: "pending", label: "À valider" },
+  { key: "rejected", label: "Archivés" },
 ];
 
 const EMPTY = {
@@ -47,13 +48,16 @@ const EMPTY = {
 export default function AdminEntries() {
   const { user, loading, token } = useAuth();
   const router = useRouter();
-  const [filter, setFilter] = useState<EntryType | "pending">("agenda");
+  const [filter, setFilter] = useState<EntryType | "pending" | "rejected">("pending");
   const [items, setItems] = useState<EntryItem[]>([]);
   const [busy, setBusy] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<EntryItem | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
   const [submitting, setSubmitting] = useState(false);
+  const [pendingTypeMap, setPendingTypeMap] = useState<Record<string, EntryType>>({});
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user?.is_admin) router.replace("/login");
@@ -64,6 +68,9 @@ export default function AdminEntries() {
     try {
       if (filter === "pending") {
         const data = token ? await api.listPendingEntries(token) : [];
+        setItems(data);
+      } else if (filter === "rejected") {
+        const data = token ? await api.listRejectedEntries(token) : [];
         setItems(data);
       } else {
         const data = await api.listEntries(filter);
@@ -155,7 +162,40 @@ export default function AdminEntries() {
     setItems((prev) => prev.filter((x) => x.id !== id));
   };
 
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (id: string, type?: EntryType) => {
+    if (!token) return;
+    const targetType = type || pendingTypeMap[id];
+    await api.approveEntry(token, id, targetType);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const handleApproveFeature = async (id: string) => {
+    if (!token) return;
+    const targetType = pendingTypeMap[id];
+    await api.approveEntry(token, id, targetType);
+    await api.featureEntry(token, id);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const handleSyncCalendar = async () => {
+    if (!token) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const r = await api.syncCalendar(token);
+      setSyncResult(
+        `Synchro OK — ${r.created} nouveaux, ${r.updated} mis à jour, ${r.unchanged} inchangés`
+      );
+      await load();
+    } catch (e: any) {
+      setSyncResult("Erreur de synchro: " + (e.message || "?"));
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncResult(null), 5000);
+    }
+  };
+
+  const handleRestore = async (id: string) => {
     if (!token) return;
     await api.approveEntry(token, id);
     setItems((prev) => prev.filter((x) => x.id !== id));
@@ -165,9 +205,9 @@ export default function AdminEntries() {
     if (!token) return;
     const ok =
       Platform.OS === "web"
-        ? window.confirm("Refuser cette proposition ? Elle sera supprimée.")
+        ? window.confirm("Refuser cette proposition ? Elle sera archivée.")
         : await new Promise<boolean>((r) =>
-            Alert.alert("Refuser ?", "Cette proposition sera supprimée.", [
+            Alert.alert("Refuser ?", "Cette proposition sera archivée.", [
               { text: "Annuler", onPress: () => r(false) },
               { text: "Refuser", style: "destructive", onPress: () => r(true) },
             ])
@@ -192,6 +232,14 @@ export default function AdminEntries() {
   const isWorkshop = filter === "workshop";
   const isFestival = filter === "festival";
   const isPending = filter === "pending";
+  const isRejected = filter === "rejected";
+
+  const TYPE_OPTIONS: { v: EntryType; l: string }[] = [
+    { v: "soiree", l: "Soirée" },
+    { v: "workshop", l: "Workshop" },
+    { v: "festival", l: "Festival" },
+    { v: "agenda", l: "Sortie" },
+  ];
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -200,8 +248,26 @@ export default function AdminEntries() {
           <Ionicons name="arrow-back" size={20} color={COLORS.primaryText} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>AGENDA & SORTIES</Text>
-        <View style={{ width: 20 }} />
+        <TouchableOpacity
+          testID="gcal-sync-btn"
+          onPress={handleSyncCalendar}
+          disabled={syncing}
+          style={syncing && { opacity: 0.6 }}
+        >
+          <Ionicons
+            name={syncing ? "sync" : "refresh"}
+            size={18}
+            color={COLORS.primaryText}
+          />
+        </TouchableOpacity>
       </View>
+
+      {syncResult && (
+        <View style={styles.syncBanner} testID="sync-result">
+          <Ionicons name="information-circle" size={14} color={COLORS.primaryText} />
+          <Text style={styles.syncBannerTxt}>{syncResult}</Text>
+        </View>
+      )}
 
       <ScrollView
         horizontal
@@ -226,7 +292,7 @@ export default function AdminEntries() {
 
       <TouchableOpacity
         testID="create-entry-btn"
-        style={[styles.addBtn, isPending && { display: "none" }]}
+        style={[styles.addBtn, (isPending || isRejected) && { display: "none" }]}
         onPress={openCreate}
       >
         <Ionicons name="add" size={18} color={COLORS.primaryText} />
@@ -241,55 +307,117 @@ export default function AdminEntries() {
         <ScrollView contentContainerStyle={styles.list}>
           {items.length === 0 && (
             <Text style={styles.emptyTxt}>
-              {isPending ? "Aucune proposition en attente." : "Aucune entrée pour ce type."}
+              {isPending
+                ? "Aucune proposition en attente. La synchro Google Calendar tourne en fond toutes les 15 min."
+                : isRejected
+                ? "Aucune entrée archivée."
+                : "Aucune entrée pour ce type."}
             </Text>
           )}
-          {items.map((e) => (
-            <View key={e.id} style={{ marginBottom: 14 }}>
-              {isPending && (
-                <View style={styles.pendingMeta}>
-                  <Ionicons name="time-outline" size={12} color={COLORS.primaryText} />
-                  <Text style={styles.pendingMetaTxt}>
-                    Proposé par {e.submitter_name || "?"} · {e.submitter_email || ""}
-                    {e.type ? ` · ${e.type.toUpperCase()}` : ""}
-                  </Text>
-                </View>
-              )}
-              <EntryCard
-                entry={e}
-                isAdmin
-                onAdminEdit={isPending ? undefined : () => openEdit(e)}
-                onAdminDelete={() => handleDelete(e.id)}
-              />
-              {isPending ? (
-                <View style={styles.modActions}>
+          {items.map((e) => {
+            const sourceLabel =
+              e.source === "gcal"
+                ? "GOOGLE CALENDAR"
+                : e.source === "submission"
+                ? "SOUMISSION"
+                : e.source === "organizer"
+                ? "ORGANISATEUR"
+                : "MANUEL";
+            const selectedType = pendingTypeMap[e.id] || (e.type as EntryType);
+            return (
+              <View key={e.id} style={{ marginBottom: 14 }}>
+                {(isPending || isRejected) && (
+                  <View style={styles.pendingMeta}>
+                    <Ionicons
+                      name={isRejected ? "archive" : "time-outline"}
+                      size={12}
+                      color={COLORS.primaryText}
+                    />
+                    <Text style={styles.pendingMetaTxt}>
+                      {sourceLabel}
+                      {e.submitter_name ? ` · ${e.submitter_name}` : ""}
+                      {e.submitter_email ? ` · ${e.submitter_email}` : ""}
+                    </Text>
+                  </View>
+                )}
+                <EntryCard
+                  entry={e}
+                  isAdmin
+                  onAdminEdit={isPending || isRejected ? undefined : () => openEdit(e)}
+                  onAdminDelete={() => handleDelete(e.id)}
+                />
+                {isPending ? (
+                  <View>
+                    <Text style={styles.typeLabel}>RECLASSER EN :</Text>
+                    <View style={styles.typeChips}>
+                      {TYPE_OPTIONS.map((opt) => (
+                        <TouchableOpacity
+                          key={opt.v}
+                          testID={`set-type-${e.id}-${opt.v}`}
+                          onPress={() =>
+                            setPendingTypeMap((p) => ({ ...p, [e.id]: opt.v }))
+                          }
+                          style={[
+                            styles.typeChip,
+                            selectedType === opt.v && styles.typeChipOn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.typeChipTxt,
+                              selectedType === opt.v && styles.typeChipTxtOn,
+                            ]}
+                          >
+                            {opt.l.toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <View style={styles.modActions}>
+                      <TouchableOpacity
+                        testID={`approve-${e.id}`}
+                        style={[styles.modBtn, styles.approveBtn]}
+                        onPress={() => handleApprove(e.id, selectedType as EntryType)}
+                      >
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={16}
+                          color={COLORS.primaryText}
+                        />
+                        <Text style={styles.approveTxt}>VALIDER</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        testID={`feature-pending-${e.id}`}
+                        style={[styles.modBtn, styles.featureBtn]}
+                        onPress={() => handleApproveFeature(e.id)}
+                      >
+                        <Ionicons name="star" size={16} color={COLORS.accentYellow} />
+                        <Text style={styles.featureTxt}>VALIDER + COUP DE CŒUR</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        testID={`reject-${e.id}`}
+                        style={[styles.modBtn, styles.rejectBtn]}
+                        onPress={() => handleReject(e.id)}
+                      >
+                        <Ionicons
+                          name="close-circle"
+                          size={16}
+                          color={COLORS.primaryText}
+                        />
+                        <Text style={styles.rejectTxt}>REFUSER</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : isRejected ? (
                   <TouchableOpacity
-                    testID={`approve-${e.id}`}
-                    style={[styles.modBtn, styles.approveBtn]}
-                    onPress={() => handleApprove(e.id)}
-                  >
-                    <Ionicons name="checkmark-circle" size={16} color={COLORS.primaryText} />
-                    <Text style={styles.approveTxt}>VALIDER</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    testID={`feature-pending-${e.id}`}
+                    testID={`restore-${e.id}`}
                     style={[styles.modBtn, styles.featureBtn]}
-                    onPress={() => handleFeature(e.id)}
+                    onPress={() => handleRestore(e.id)}
                   >
-                    <Ionicons name="star" size={16} color={COLORS.accentYellow} />
-                    <Text style={styles.featureTxt}>VALIDER + COUP DE CŒUR</Text>
+                    <Ionicons name="arrow-undo" size={16} color={COLORS.accentYellow} />
+                    <Text style={styles.featureTxt}>RESTAURER</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    testID={`reject-${e.id}`}
-                    style={[styles.modBtn, styles.rejectBtn]}
-                    onPress={() => handleReject(e.id)}
-                  >
-                    <Ionicons name="close-circle" size={16} color={COLORS.primaryText} />
-                    <Text style={styles.rejectTxt}>REFUSER</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                e.status === "featured" ? (
+                ) : e.status === "featured" ? (
                   <TouchableOpacity
                     testID={`unfeature-${e.id}`}
                     style={[styles.modBtn, styles.unfeatureBtn]}
@@ -307,10 +435,10 @@ export default function AdminEntries() {
                     <Ionicons name="star" size={16} color={COLORS.accentYellow} />
                     <Text style={styles.featureTxt}>METTRE EN COUP DE CŒUR</Text>
                   </TouchableOpacity>
-                )
-              )}
-            </View>
-          ))}
+                )}
+              </View>
+            );
+          })}
         </ScrollView>
       )}
 
@@ -666,6 +794,55 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
     letterSpacing: 1.2,
+    color: COLORS.primaryText,
+  },
+  typeLabel: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    color: COLORS.secondaryText,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  typeChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  typeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 40,
+    backgroundColor: "#fff",
+  },
+  typeChipOn: {
+    backgroundColor: COLORS.primaryText,
+    borderColor: COLORS.primaryText,
+  },
+  typeChipTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: COLORS.primaryText,
+  },
+  typeChipTxtOn: { color: COLORS.accentYellow },
+  syncBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFBEA",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.accentYellow,
+    paddingHorizontal: SPACING.screen,
+    paddingVertical: 8,
+  },
+  syncBannerTxt: {
+    flex: 1,
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
     color: COLORS.primaryText,
   },
   primaryBtnTxt: {

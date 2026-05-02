@@ -99,6 +99,9 @@ class Entry(BaseModel):
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
     submitter_email: Optional[str] = ""
+    source: str = "manual"  # 'manual' | 'gcal' | 'submission' | 'organizer'
+    external_id: Optional[str] = None  # iCal UID for gcal sync
+    last_modified_at: Optional[datetime] = None  # for gcal change detection
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -501,23 +504,35 @@ async def submit_entry(payload: EntrySubmit):
 
 
 @api_router.post("/entries/{entry_id}/approve", response_model=Entry)
-async def approve_entry(entry_id: str, _user: User = Depends(require_admin)):
+async def approve_entry(
+    entry_id: str,
+    type: Optional[str] = None,
+    _user: User = Depends(require_admin),
+):
+    """Approve a pending entry. Optionally re-categorise its type
+    (soiree | concert | workshop | festival) — used when validating GCal imports."""
     existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entry not found")
-    await db.entries.update_one({"id": entry_id}, {"$set": {"status": "approved"}})
-    existing["status"] = "approved"
+    update: dict = {"status": "approved"}
+    if type:
+        if type not in VALID_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid type")
+        update["type"] = type
+    await db.entries.update_one({"id": entry_id}, {"$set": update})
+    existing.update(update)
     return Entry(**existing)
 
 
 @api_router.post("/entries/{entry_id}/reject")
 async def reject_entry(entry_id: str, _user: User = Depends(require_admin)):
-    """Reject a pending submission. The entry is removed from the database."""
+    """Reject a pending entry. It is archived (status=rejected) so it remains
+    visible in the admin "Archivés" tab and can be restored later."""
     existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entry not found")
-    await db.entries.delete_one({"id": entry_id})
-    return {"ok": True, "id": entry_id}
+    await db.entries.update_one({"id": entry_id}, {"$set": {"status": "rejected"}})
+    return {"ok": True, "id": entry_id, "status": "rejected"}
 
 
 @api_router.post("/entries/{entry_id}/feature", response_model=Entry)
@@ -767,6 +782,124 @@ def fetch_calendar_entries() -> List[dict]:
 @api_router.get("/calendar/events")
 async def calendar_events():
     return fetch_calendar_entries()
+
+
+# ========= Google Calendar Sync — pending queue =========
+
+GCAL_SYNC_INTERVAL = int(os.environ.get("GCAL_SYNC_INTERVAL_SECONDS", "900"))  # 15 min default
+
+
+async def sync_gcal_to_pending() -> dict:
+    """Pull events from the Google Calendar iCal feed and upsert them into the
+    Mongo `entries` collection with status=pending so the admin can validate
+    them. Existing entries are matched by (source=gcal, external_id=ical UID).
+
+    Returns a stats dict: {created, updated, unchanged}.
+    """
+    items = fetch_calendar_entries()
+    stats = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+    now = datetime.now(timezone.utc)
+
+    for item in items:
+        ical_uid = item.get("id") or ""
+        if not ical_uid:
+            stats["skipped"] += 1
+            continue
+
+        existing = await db.entries.find_one(
+            {"source": "gcal", "external_id": ical_uid}, {"_id": 0}
+        )
+
+        # Build a comparable signature of the relevant fields
+        signature = {
+            "title": item.get("title") or "",
+            "date": item.get("date") or "",
+            "end_date": item.get("end_date"),
+            "time": item.get("time") or "",
+            "venue": item.get("venue") or "",
+            "address": item.get("address") or "",
+            "description": item.get("description") or "",
+            "ticket_link": item.get("ticket_link") or "",
+        }
+
+        if existing:
+            # Skip already-rejected (admin chose to archive it)
+            if existing.get("status") == "rejected":
+                stats["skipped"] += 1
+                continue
+            existing_sig = {k: existing.get(k) or ("" if k != "end_date" else None) for k in signature}
+            if existing_sig == signature:
+                stats["unchanged"] += 1
+                continue
+            # Content changed → reset to pending for re-validation
+            update = {**signature, "status": "pending", "last_modified_at": now}
+            await db.entries.update_one(
+                {"id": existing["id"]}, {"$set": update}
+            )
+            stats["updated"] += 1
+        else:
+            new_id = str(uuid.uuid4())
+            doc = {
+                "id": new_id,
+                "type": "agenda",  # generic — admin reassigns during validation
+                "title": signature["title"],
+                "date": signature["date"],
+                "end_date": signature["end_date"],
+                "time": signature["time"],
+                "venue": signature["venue"],
+                "address": signature["address"],
+                "description": signature["description"],
+                "instructor": "",
+                "teacher_id": None,
+                "level": "",
+                "price": "",
+                "category": "",
+                "ticket_link": signature["ticket_link"],
+                "cover_photo": None,
+                "featured": False,
+                "status": "pending",
+                "submitter_name": "Google Calendar",
+                "submitter_email": "",
+                "source": "gcal",
+                "external_id": ical_uid,
+                "last_modified_at": now,
+                "created_at": now,
+            }
+            await db.entries.insert_one(doc)
+            stats["created"] += 1
+
+    logger.info("gcal sync done: %s", stats)
+    return stats
+
+
+@api_router.post("/calendar/sync")
+async def trigger_gcal_sync(_user: User = Depends(require_admin)):
+    """Manually trigger a Google Calendar sync. Admin only."""
+    # Bust the cache so we always get fresh data
+    _ical_cache["at"] = None
+    stats = await sync_gcal_to_pending()
+    return {"ok": True, **stats}
+
+
+import asyncio  # noqa: E402
+
+
+async def _gcal_periodic_loop():
+    """Background task: re-sync GCal every GCAL_SYNC_INTERVAL seconds."""
+    # First sync ~30s after startup so the app is ready
+    await asyncio.sleep(30)
+    while True:
+        try:
+            await sync_gcal_to_pending()
+        except Exception as e:
+            logger.exception("gcal periodic sync failed: %s", e)
+        await asyncio.sleep(GCAL_SYNC_INTERVAL)
+
+
+@app.on_event("startup")
+async def _startup_tasks():
+    asyncio.create_task(_gcal_periodic_loop())
+    logger.info("Google Calendar background sync scheduled every %ss", GCAL_SYNC_INTERVAL)
 
 
 app.include_router(api_router)
