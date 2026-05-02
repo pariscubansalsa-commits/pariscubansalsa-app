@@ -209,6 +209,19 @@ export const api = {
       credentials: "include",
     }).then((r) => handle<{ ok: boolean; id: string; status: string }>(r)),
 
+  duplicateEntry: (token: string, id: string) =>
+    fetch(`${API}/entries/${id}/duplicate`, {
+      method: "POST",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<EntryItem>(r)),
+
+  listPastEntries: (token: string) =>
+    fetch(`${API}/entries?include_past=true`, {
+      credentials: "include",
+      headers: authHeaders(token),
+    }).then((r) => handle<EntryItem[]>(r)),
+
   syncCalendar: (token: string) =>
     fetch(`${API}/calendar/sync`, {
       method: "POST",

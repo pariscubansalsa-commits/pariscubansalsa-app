@@ -12,6 +12,21 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta, date as date_type
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+    PARIS_TZ = ZoneInfo("Europe/Paris")
+except Exception:
+    PARIS_TZ = timezone.utc
+
+
+def today_paris() -> date_type:
+    """Return today's date in Europe/Paris timezone (Cuban salsa is in Paris :)."""
+    return datetime.now(PARIS_TZ).date()
+
+
+def today_paris_str() -> str:
+    """ISO date string YYYY-MM-DD for today in Europe/Paris."""
+    return today_paris().isoformat()
 
 
 ROOT_DIR = Path(__file__).parent
@@ -437,7 +452,14 @@ async def list_entries(
     level: Optional[str] = None,
     category: Optional[str] = None,
     teacher_id: Optional[str] = None,
+    include_past: Optional[bool] = False,
 ):
+    """List entries.
+
+    By default only future entries are returned (date >= today, server-side
+    timezone Europe/Paris). Admin can pass ?include_past=true to bypass that
+    filter for the History tab.
+    """
     query: dict = {}
     if type:
         if type not in VALID_TYPES:
@@ -455,19 +477,38 @@ async def list_entries(
         query["category"] = category
     if teacher_id:
         query["teacher_id"] = teacher_id
-    if status:
+
+    user_admin = False
+    if status or include_past:
         user = await get_current_user(request)
-        if not user or not user.is_admin:
+        user_admin = bool(user and user.is_admin)
+        if not user_admin:
             raise HTTPException(status_code=401, detail="Admin only")
+
+    if status:
         # Override status filter for admin
-        if isinstance(query.get("status"), dict) or "status" in query:
-            query["status"] = status
-        else:
-            query["status"] = status
+        query["status"] = status
     elif "status" not in query:
         query["status"] = {"$in": ["approved", "featured"]}
 
-    items = await db.entries.find(query, {"_id": 0}).to_list(1000)
+    # Date filter — public users only see today and upcoming events.
+    # For festivals we use end_date when present (a 3-day festival starting
+    # yesterday is still "upcoming" until end_date passes).
+    today_str = today_paris_str()
+    if not include_past:
+        # date >= today OR end_date >= today (festivals)
+        query["$or"] = [
+            {"date": {"$gte": today_str}},
+            {"end_date": {"$gte": today_str}},
+        ]
+    elif user_admin:
+        # Admin History tab: show STRICTLY past events
+        query["$and"] = [
+            {"date": {"$lt": today_str}},
+            {"$or": [{"end_date": {"$in": [None, ""]}}, {"end_date": {"$lt": today_str}}]},
+        ]
+
+    items = await db.entries.find(query, {"_id": 0}).to_list(2000)
 
     # Sort: featured first, then by date asc
     def sort_key(e):
@@ -564,11 +605,16 @@ async def unfeature_entry(entry_id: str, _user: User = Depends(require_admin)):
 
 @api_router.get("/teachers/{teacher_id}/workshops", response_model=List[Entry])
 async def teacher_workshops(teacher_id: str):
+    today = today_paris_str()
     items = await db.entries.find(
         {
             "teacher_id": teacher_id,
             "type": "workshop",
             "status": {"$in": ["approved", "featured"]},
+            "$or": [
+                {"date": {"$gte": today}},
+                {"end_date": {"$gte": today}},
+            ],
         },
         {"_id": 0},
     ).to_list(500)
@@ -630,6 +676,30 @@ async def update_entry(entry_id: str, payload: EntryCreate, _user: User = Depend
 async def delete_entry(entry_id: str, _user: User = Depends(require_admin)):
     await db.entries.delete_one({"id": entry_id})
     return {"ok": True}
+
+
+@api_router.post("/entries/{entry_id}/duplicate", response_model=Entry)
+async def duplicate_entry(entry_id: str, _user: User = Depends(require_admin)):
+    """Duplicate an event. The new entry is a draft (status='pending') with all
+    fields copied except the date which is cleared so the admin must set a new
+    one before publishing."""
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    copy = dict(existing)
+    copy.pop("_id", None)
+    copy["id"] = str(uuid.uuid4())
+    copy["status"] = "pending"
+    copy["featured"] = False
+    copy["source"] = "manual"
+    copy["external_id"] = None
+    copy["last_modified_at"] = None
+    copy["created_at"] = datetime.now(timezone.utc)
+    copy["date"] = ""
+    copy["end_date"] = None
+    copy["title"] = (existing.get("title") or "") + " (copie)"
+    await db.entries.insert_one(copy)
+    return Entry(**copy)
 
 
 # ========= Teachers =========
@@ -793,9 +863,19 @@ def fetch_calendar_entries() -> List[dict]:
     return items
 
 
+def _is_future_or_today(item: dict) -> bool:
+    """An iCal item is considered upcoming if its date (or end_date for
+    multi-day festivals) is >= today in Europe/Paris."""
+    today = today_paris_str()
+    d = item.get("date") or ""
+    end = item.get("end_date") or ""
+    return (d >= today) or (end >= today)
+
+
 @api_router.get("/calendar/events")
 async def calendar_events():
-    return fetch_calendar_entries()
+    """Return upcoming iCal events only (server-side filter)."""
+    return [e for e in fetch_calendar_entries() if _is_future_or_today(e)]
 
 
 # ========= Google Calendar Sync — pending queue =========
@@ -813,10 +893,19 @@ async def sync_gcal_to_pending() -> dict:
     items = fetch_calendar_entries()
     stats = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
     now = datetime.now(timezone.utc)
+    today = today_paris_str()
 
     for item in items:
         ical_uid = item.get("id") or ""
         if not ical_uid:
+            stats["skipped"] += 1
+            continue
+
+        # Skip past events on ingestion (rule: "ne pas importer les events passés")
+        d = item.get("date") or ""
+        end = item.get("end_date") or ""
+        if d < today and (not end or end < today):
+            # Already-imported but now-past entries are kept in DB (for History tab)
             stats["skipped"] += 1
             continue
 

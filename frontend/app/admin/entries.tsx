@@ -22,12 +22,13 @@ import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
 
-const TYPES: { key: EntryType | "pending" | "rejected"; label: string }[] = [
+const TYPES: { key: EntryType | "pending" | "rejected" | "history"; label: string }[] = [
   { key: "pending", label: "À valider" },
   { key: "agenda", label: "Agenda" },
   { key: "soiree", label: "Soirées" },
   { key: "workshop", label: "Workshops" },
   { key: "festival", label: "Festivals" },
+  { key: "history", label: "Historique" },
   { key: "rejected", label: "Archivés" },
 ];
 
@@ -48,7 +49,7 @@ const EMPTY = {
 export default function AdminEntries() {
   const { user, loading, token } = useAuth();
   const router = useRouter();
-  const [filter, setFilter] = useState<EntryType | "pending" | "rejected">("pending");
+  const [filter, setFilter] = useState<EntryType | "pending" | "rejected" | "history">("pending");
   const [items, setItems] = useState<EntryItem[]>([]);
   const [busy, setBusy] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -71,6 +72,9 @@ export default function AdminEntries() {
         setItems(data);
       } else if (filter === "rejected") {
         const data = token ? await api.listRejectedEntries(token) : [];
+        setItems(data);
+      } else if (filter === "history") {
+        const data = token ? await api.listPastEntries(token) : [];
         setItems(data);
       } else {
         const data = await api.listEntries(filter);
@@ -233,6 +237,18 @@ export default function AdminEntries() {
   const isFestival = filter === "festival";
   const isPending = filter === "pending";
   const isRejected = filter === "rejected";
+  const isHistory = filter === "history";
+
+  const handleDuplicate = async (id: string) => {
+    if (!token) return;
+    try {
+      const created = await api.duplicateEntry(token, id);
+      setSyncResult(`Copie créée — pense à lui donner une nouvelle date dans À VALIDER (${created.title})`);
+      setTimeout(() => setSyncResult(null), 6000);
+    } catch (e: any) {
+      setSyncResult("Erreur duplication: " + (e.message || "?"));
+    }
+  };
 
   const TYPE_OPTIONS: { v: EntryType; l: string }[] = [
     { v: "soiree", l: "Soirée" },
@@ -292,7 +308,7 @@ export default function AdminEntries() {
 
       <TouchableOpacity
         testID="create-entry-btn"
-        style={[styles.addBtn, (isPending || isRejected) && { display: "none" }]}
+        style={[styles.addBtn, (isPending || isRejected || isHistory) && { display: "none" }]}
         onPress={openCreate}
       >
         <Ionicons name="add" size={18} color={COLORS.primaryText} />
@@ -311,6 +327,8 @@ export default function AdminEntries() {
                 ? "Aucune proposition en attente. La synchro Google Calendar tourne en fond toutes les 15 min."
                 : isRejected
                 ? "Aucune entrée archivée."
+                : isHistory
+                ? "Aucun event passé pour le moment."
                 : "Aucune entrée pour ce type."}
             </Text>
           )}
@@ -417,24 +435,55 @@ export default function AdminEntries() {
                     <Ionicons name="arrow-undo" size={16} color={COLORS.accentYellow} />
                     <Text style={styles.featureTxt}>RESTAURER</Text>
                   </TouchableOpacity>
+                ) : isHistory ? (
+                  <View style={styles.modActions}>
+                    <TouchableOpacity
+                      testID={`duplicate-history-${e.id}`}
+                      style={[styles.modBtn, styles.approveBtn]}
+                      onPress={() => handleDuplicate(e.id)}
+                    >
+                      <Ionicons name="copy-outline" size={16} color={COLORS.primaryText} />
+                      <Text style={styles.approveTxt}>DUPLIQUER POUR REPROGRAMMER</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : e.status === "featured" ? (
-                  <TouchableOpacity
-                    testID={`unfeature-${e.id}`}
-                    style={[styles.modBtn, styles.unfeatureBtn]}
-                    onPress={() => handleUnfeature(e.id)}
-                  >
-                    <Ionicons name="star-outline" size={16} color={COLORS.primaryText} />
-                    <Text style={styles.featureTxt}>RETIRER DU COUP DE CŒUR</Text>
-                  </TouchableOpacity>
+                  <View style={styles.modActions}>
+                    <TouchableOpacity
+                      testID={`duplicate-${e.id}`}
+                      style={[styles.modBtn, styles.unfeatureBtn]}
+                      onPress={() => handleDuplicate(e.id)}
+                    >
+                      <Ionicons name="copy-outline" size={16} color={COLORS.primaryText} />
+                      <Text style={styles.featureTxt}>DUPLIQUER</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      testID={`unfeature-${e.id}`}
+                      style={[styles.modBtn, styles.unfeatureBtn]}
+                      onPress={() => handleUnfeature(e.id)}
+                    >
+                      <Ionicons name="star-outline" size={16} color={COLORS.primaryText} />
+                      <Text style={styles.featureTxt}>RETIRER COUP DE CŒUR</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : (
-                  <TouchableOpacity
-                    testID={`feature-${e.id}`}
-                    style={[styles.modBtn, styles.featureBtn]}
-                    onPress={() => handleFeature(e.id)}
-                  >
-                    <Ionicons name="star" size={16} color={COLORS.accentYellow} />
-                    <Text style={styles.featureTxt}>METTRE EN COUP DE CŒUR</Text>
-                  </TouchableOpacity>
+                  <View style={styles.modActions}>
+                    <TouchableOpacity
+                      testID={`duplicate-${e.id}`}
+                      style={[styles.modBtn, styles.unfeatureBtn]}
+                      onPress={() => handleDuplicate(e.id)}
+                    >
+                      <Ionicons name="copy-outline" size={16} color={COLORS.primaryText} />
+                      <Text style={styles.featureTxt}>DUPLIQUER</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      testID={`feature-${e.id}`}
+                      style={[styles.modBtn, styles.featureBtn]}
+                      onPress={() => handleFeature(e.id)}
+                    >
+                      <Ionicons name="star" size={16} color={COLORS.accentYellow} />
+                      <Text style={styles.featureTxt}>METTRE EN COUP DE CŒUR</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             );

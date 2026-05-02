@@ -589,3 +589,97 @@ agent_communication:
 
         No console errors observed during the run. The PWA install / offline
         plumbing is fully wired and working.
+
+    - agent: "testing"
+      message: |
+        ## Backend regression — past-event filter + duplicate endpoint (2026-05-02)
+
+        Test suite: /app/backend_test.py against
+        https://rhythm-frames-3.preview.emergentagent.com/api with admin Bearer
+        token test_session_pcs_admin_000. Result: 23/24 PASS, 1 FAIL.
+        TODAY Europe/Paris = 2026-05-02.
+
+        ### Section 1 — Public past-filter — PASS (4/4)
+          - GET /api/entries -> 200, 6 items, 0 past leaks.
+          - GET /api/entries?type=workshop -> 200, 2 items, 0 past leaks.
+          - GET /api/entries?featured=true -> 200, 4 items, 0 past leaks.
+          - GET /api/calendar/events -> 200, 29 items, 0 past leaks.
+          Rule enforced: date >= today OR end_date >= today (multi-day festivals
+          still ongoing are correctly kept).
+
+        ### Section 2 — Admin History tab — PASS (2/2)
+          - GET /api/entries?include_past=true WITHOUT auth -> 401 ✔
+          - GET /api/entries?include_past=true WITH admin -> 200, 8 items; every
+            item has date<today AND (no end_date OR end_date<today). 0 leaks.
+
+        ### Section 3 — Featured carousel filter — PASS (4/4)
+          - Picked featured workshop "Bootcamp Lady Cuban Style"
+            (id=19d6b8e5…, original date=2026-06-14).
+          - PUT /api/entries/{id} with {type,title,date:2026-05-01,featured:true}
+            -> 200.
+          - GET /api/entries?featured=true -> 3 items, target NOT present (hidden).
+          - GET /api/entries?include_past=true (admin) -> target present in
+            history.
+          - Restored original date=2026-06-14 via PUT -> 200.
+
+        ### Section 4 — Duplicate endpoint — 7/8 PASS, 1 FAIL
+          Source: approved/featured workshop id=19d6b8e5…
+          POST /api/entries/{id}/duplicate -> 200, response validated:
+            ✔ new id differs from source (18b675f5…)
+            ✔ status='pending'
+            ✔ featured=False
+            ✔ source='manual'
+            ✔ external_id=None
+            ✔ title="Bootcamp Lady Cuban Style (copie)" (ends with ' (copie)')
+            ✔ date='' (cleared)
+
+          ❌ FAIL: GET /api/entries?status=pending (admin) does NOT include the
+             duplicated entry.
+             Observed: pending count=27, contains_dup=False.
+             Repro with explicit include_past=true: GET
+             /api/entries?status=pending&include_past=true -> 1 item (the dup)
+             — so the duplicate IS stored correctly, but it is FILTERED OUT of
+             the admin pending queue by the default date filter in
+             list_entries().
+             Root cause: in server.py:498-508, when `include_past` is false,
+             the handler adds `$or: [{date: {$gte: today}}, {end_date: {$gte:
+             today}}]` to the query UNCONDITIONALLY — including for admin
+             calls with status=pending/rejected. The duplicate has date=""
+             and end_date=None so both branches fail and it is hidden.
+             Impact: admins won't see newly-duplicated drafts in the "À
+             VALIDER" tab until they set a date on them. Breaks the
+             duplicate → edit → publish workflow described in the review
+             request ("GET /api/entries?status=pending (admin) must include
+             the duplicated entry").
+             Suggested fix (server.py list_entries):
+               - If `status` is explicitly provided by an admin (pending /
+                 rejected / approved / featured), OR the entry has an empty
+                 `date` (draft), skip the "future date" filter.
+               - Simple patch:
+                   if not include_past and not status:
+                       query["$or"] = [...]
+                 (i.e. skip date filter whenever admin passes a status filter).
+             Cleanup: duplicate entry was deleted after the test.
+
+        ### Section 5 — Sort order — PASS (3/3)
+          GET /api/entries?type=workshop:
+            - All status='featured' items precede status='approved' items. ✔
+            - featured dates ascending: ['2026-06-14', '2026-07-04'] ✔
+            - approved group empty (only featured workshops are public here). ✔
+
+        ### Section 6 — GCal sync skips past events — PASS (2/2)
+          - POST /api/calendar/sync (admin) -> 200
+            {ok:true, created:0, updated:0, unchanged:29, skipped:2}.
+            Skipped counter is a non-negative int, consistent with past events
+            being filtered out on ingestion.
+          - GET /api/entries?status=pending (admin) filtered to source='gcal':
+            27 items, 0 past (all have date >= today). Past ingest-skip rule is
+            enforced.
+
+        ### Blocker / Action items
+          ❌ Fix list_entries date filter so that admin status=pending queries
+             include draft entries with empty date (needed for duplicate
+             endpoint usability).
+
+        Test script: /app/backend_test.py (re-runnable with
+        BACKEND_URL env override). All test-created data cleaned up.

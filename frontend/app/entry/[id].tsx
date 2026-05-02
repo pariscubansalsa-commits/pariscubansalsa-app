@@ -191,6 +191,17 @@ export default function EntryDetail() {
     }
   };
 
+  const handleDuplicate = async () => {
+    if (!token || !entry) return;
+    try {
+      const created = await api.duplicateEntry(token, entry.id);
+      showToast("COPIE CRÉÉE — DATE À DÉFINIR");
+      setTimeout(() => router.replace(`/entry/${created.id}` as any), 700);
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
+    }
+  };
+
   const handleToggleFeature = async () => {
     if (!token || !entry) return;
     try {
@@ -387,6 +398,16 @@ export default function EntryDetail() {
                 <Ionicons name="trash-outline" size={16} color="#C0392B" />
                 <Text style={[styles.adminBtnTxt, { color: "#C0392B" }]}>
                   SUPPRIMER L&apos;EVENT
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="detail-duplicate"
+                style={[styles.adminBtn, styles.adminBtnNeutral]}
+                onPress={handleDuplicate}
+              >
+                <Ionicons name="copy-outline" size={16} color={COLORS.accentYellow} />
+                <Text style={[styles.adminBtnTxt, { color: COLORS.accentYellow }]}>
+                  DUPLIQUER POUR REPROGRAMMER
                 </Text>
               </TouchableOpacity>
             </View>

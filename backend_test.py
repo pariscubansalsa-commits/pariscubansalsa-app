@@ -1,405 +1,293 @@
 """
-Paris Cuban Salsa — Regression test for PUT /api/entries/{id} fix
-and related moderation endpoints.
+Backend regression tests for Paris Cuban Salsa — past-event filter rules + duplicate endpoint.
 
-Coverage:
-  1) PUT handles entries whose status is null/missing (featured=true/false toggle)
-  2) PUT preserves description when not sent in body
-  3) POST+DELETE entry
-  4) Approve with type query param reclassifies
-  5) Reject + restore round trip
-
-Auth: Bearer test_session_pcs_admin_000 (from /app/memory/test_credentials.md)
-URL : EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env (+ /api prefix)
+Covers (per review request):
+  1. Public requests filter past events (date < today Europe/Paris)
+  2. Admin History tab (include_past=true) returns past events only
+  3. Featured carousel filter excludes past-dated featured entries
+  4. Duplicate endpoint
+  5. Sort: featured first then by date asc
+  6. GCal sync skips past events on ingest
 """
-
-from __future__ import annotations
-
-import json
+import os
 import sys
-from typing import Any, Optional
+from datetime import timedelta, datetime
+from zoneinfo import ZoneInfo
 
 import requests
 
+BASE = os.environ.get("BACKEND_URL", "https://rhythm-frames-3.preview.emergentagent.com").rstrip("/")
+API = f"{BASE}/api"
+TOKEN = "test_session_pcs_admin_000"
+ADMIN_HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+PARIS = ZoneInfo("Europe/Paris")
+TODAY = datetime.now(PARIS).date()
+TODAY_STR = TODAY.isoformat()
+YESTERDAY = (TODAY - timedelta(days=1)).isoformat()
 
-FRONT_ENV = "/app/frontend/.env"
-
-
-def load_backend_url() -> str:
-    with open(FRONT_ENV) as fh:
-        for line in fh:
-            line = line.strip()
-            if line.startswith("EXPO_PUBLIC_BACKEND_URL="):
-                return line.split("=", 1)[1].strip().strip('"')
-    raise RuntimeError("EXPO_PUBLIC_BACKEND_URL not found")
-
-
-BASE = load_backend_url().rstrip("/") + "/api"
-ADMIN_TOKEN = "test_session_pcs_admin_000"
-ADMIN_HEADERS = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+results = []
 
 
-PASS: list[str] = []
-FAIL: list[str] = []
-cleanup_ids: set[str] = set()
+def rec(name, ok, detail=""):
+    results.append((name, ok, detail))
+    mark = "PASS" if ok else "FAIL"
+    print(f"[{mark}] {name} :: {detail}")
 
 
-def log_pass(msg: str) -> None:
-    print(f"  [PASS] {msg}")
-    PASS.append(msg)
+def ensure_future(d: str, end: str = "") -> bool:
+    return (d and d >= TODAY_STR) or (end and end >= TODAY_STR)
 
 
-def log_fail(msg: str) -> None:
-    print(f"  [FAIL] {msg}")
-    FAIL.append(msg)
+def ensure_past(d: str, end: str = "") -> bool:
+    if not d or d >= TODAY_STR:
+        return False
+    if end and end >= TODAY_STR:
+        return False
+    return True
 
 
-def section(title: str) -> None:
-    print(f"\n=== {title} ===")
+# --------- 1) Public past-filter ---------
+def test_1_public_filters():
+    for path in ["/entries", "/entries?type=workshop", "/entries?featured=true"]:
+        r = requests.get(f"{API}{path}", timeout=20)
+        ok = r.status_code == 200
+        if not ok:
+            rec(f"GET {path} -> 200", False, f"status={r.status_code} body={r.text[:200]}")
+            continue
+        items = r.json()
+        bad = [it for it in items if not ensure_future(it.get("date") or "", it.get("end_date") or "")]
+        rec(
+            f"GET {path} hides past events",
+            len(bad) == 0,
+            f"count={len(items)} past_leaks={len(bad)}"
+            + (f" examples={[(b.get('id'), b.get('date'), b.get('end_date')) for b in bad[:3]]}" if bad else ""),
+        )
 
-
-def short(obj: Any, limit: int = 220) -> str:
-    try:
-        text = json.dumps(obj, ensure_ascii=False, default=str)
-    except Exception:
-        text = str(obj)
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
-# ---------------------------------------------------------------------------
-# 1) PUT on entries with status=null — must not crash, must set featured/status
-# ---------------------------------------------------------------------------
-
-def test_put_status_null_safe() -> None:
-    section("1) PUT /api/entries/{id} on entry with status=null")
-
-    # Pick a workshop entry from public feed.
-    r = requests.get(f"{BASE}/entries", params={"type": "workshop"}, timeout=20)
+    r = requests.get(f"{API}/calendar/events", timeout=20)
     if r.status_code != 200:
-        log_fail(f"GET /entries?type=workshop -> {r.status_code} {r.text[:120]}")
+        rec("GET /calendar/events -> 200", False, f"status={r.status_code}")
         return
     items = r.json()
-    if not items:
-        log_fail("No workshop entries available to test PUT")
-        return
+    bad = [it for it in items if not ensure_future(it.get("date") or "", it.get("end_date") or "")]
+    rec("GET /calendar/events hides past events", len(bad) == 0, f"count={len(items)} past_leaks={len(bad)}")
 
-    entry = items[0]
-    eid = entry["id"]
-    orig_title = entry["title"]
-    orig_date = entry["date"]
-    orig_status = entry.get("status")
-    orig_featured = entry.get("featured")
-    print(f"  picked workshop id={eid[:8]}… title={orig_title!r} "
-          f"status={orig_status!r} featured={orig_featured}")
 
-    # Simulate the "status=null" condition by clearing status in DB-like manner.
-    # We can't touch Mongo directly here, but the public feed returns 'approved'
-    # entries whose stored status may be None per the review's framing (the
-    # Entry model defaults to 'approved' on read but we still want to exercise
-    # the PUT path). The PUT should not crash regardless.
+# --------- 2) Admin History tab ---------
+def test_2_admin_history():
+    r = requests.get(f"{API}/entries?include_past=true", timeout=20)
+    rec("GET /entries?include_past=true without auth -> 401", r.status_code == 401, f"status={r.status_code}")
 
-    body = {
-        "type": "workshop",
-        "title": orig_title,
-        "date": orig_date,
-        "featured": True,
-    }
-    r = requests.put(f"{BASE}/entries/{eid}", json=body, headers=ADMIN_HEADERS, timeout=20)
+    r = requests.get(f"{API}/entries?include_past=true", headers=ADMIN_HEADERS, timeout=20)
     if r.status_code != 200:
-        log_fail(f"PUT featured=true -> {r.status_code} {r.text[:300]}")
+        rec("GET /entries?include_past=true admin -> 200", False, f"status={r.status_code} body={r.text[:300]}")
         return
-    data = r.json()
-    print(f"    resp(featured=true): status={data.get('status')!r} "
-          f"featured={data.get('featured')} title={data.get('title')!r}")
-    if data.get("status") == "featured" and data.get("featured") is True:
-        log_pass("PUT featured=true returns status='featured' and featured=true")
-    else:
-        log_fail(f"PUT featured=true unexpected status/featured: {short(data)}")
-    if data.get("title") == orig_title:
-        log_pass("Title preserved after PUT featured=true")
-    else:
-        log_fail(f"Title changed after PUT featured=true: {data.get('title')!r} vs {orig_title!r}")
+    items = r.json()
+    not_past = [it for it in items if not ensure_past(it.get("date") or "", it.get("end_date") or "")]
+    rec(
+        "admin History returns only strictly past events",
+        len(not_past) == 0,
+        f"count={len(items)} non_past={len(not_past)}"
+        + (f" examples={[(n.get('id'), n.get('date'), n.get('end_date')) for n in not_past[:3]]}" if not_past else ""),
+    )
 
-    # Now unfeature
-    body2 = {
-        "type": "workshop",
-        "title": orig_title,
-        "date": orig_date,
-        "featured": False,
-    }
-    r = requests.put(f"{BASE}/entries/{eid}", json=body2, headers=ADMIN_HEADERS, timeout=20)
+
+# --------- 3) Featured carousel filter ---------
+def test_3_featured_past_hidden():
+    r = requests.get(f"{API}/entries?status=featured", headers=ADMIN_HEADERS, timeout=20)
     if r.status_code != 200:
-        log_fail(f"PUT featured=false -> {r.status_code} {r.text[:300]}")
+        rec("GET /entries?status=featured admin -> 200", False, f"status={r.status_code}")
         return
-    data = r.json()
-    print(f"    resp(featured=false): status={data.get('status')!r} "
-          f"featured={data.get('featured')} title={data.get('title')!r}")
-    if data.get("status") == "approved" and data.get("featured") is False:
-        log_pass("PUT featured=false returns status='approved' and featured=false")
-    else:
-        log_fail(f"PUT featured=false unexpected status/featured: {short(data)}")
-    if data.get("title") == orig_title:
-        log_pass("Title preserved after PUT featured=false")
-    else:
-        log_fail(f"Title changed after PUT featured=false: {data.get('title')!r} vs {orig_title!r}")
-
-    # Restore original featured state if it differed.
-    if orig_featured != data.get("featured"):
-        restore = {
+    feats = r.json()
+    target = next((e for e in feats if e.get("type") == "workshop"), None) or (feats[0] if feats else None)
+    created_ephemeral = False
+    if not target:
+        body = {
             "type": "workshop",
-            "title": orig_title,
-            "date": orig_date,
-            "featured": bool(orig_featured),
+            "title": "Test Featured Workshop (past-filter regression)",
+            "date": (TODAY + timedelta(days=30)).isoformat(),
+            "featured": True,
+            "status": "featured",
         }
-        requests.put(f"{BASE}/entries/{eid}", json=restore, headers=ADMIN_HEADERS, timeout=20)
-        print(f"  restored featured={bool(orig_featured)} on {eid[:8]}…")
+        r = requests.post(f"{API}/entries", json=body, headers=ADMIN_HEADERS, timeout=20)
+        if r.status_code != 200:
+            rec("seed featured workshop for test 3", False, f"status={r.status_code} body={r.text[:300]}")
+            return
+        target = r.json()
+        created_ephemeral = True
 
+    eid = target["id"]
+    original_date = target.get("date") or ""
+    original_title = target.get("title") or ""
+    original_type = target.get("type") or "workshop"
 
-# ---------------------------------------------------------------------------
-# 2) PUT preserves description when not sent
-# ---------------------------------------------------------------------------
-
-def test_put_preserves_description() -> None:
-    section("2) PUT /api/entries/{id} preserves description when omitted")
-
-    # Create a workshop with a description so we control the starting state.
-    payload = {
-        "type": "workshop",
-        "title": "Regression test — preserve description",
-        "date": "2027-02-14",
-        "description": "Valse cubaine avancée avec Yanet — description à préserver.",
-        "venue": "Studio Harmonic",
-        "level": "advanced",
-        "price": "35€",
-        "status": "approved",
-    }
-    r = requests.post(f"{BASE}/entries", json=payload, headers=ADMIN_HEADERS, timeout=20)
-    if r.status_code != 200:
-        log_fail(f"seed POST /entries -> {r.status_code} {r.text[:200]}")
+    put_body = {"type": original_type, "title": original_title, "date": YESTERDAY, "featured": True}
+    r = requests.put(f"{API}/entries/{eid}", json=put_body, headers=ADMIN_HEADERS, timeout=20)
+    ok = r.status_code == 200
+    rec(f"PUT entry {eid[:8]} to yesterday -> 200", ok, f"status={r.status_code} body={r.text[:200]}")
+    if not ok:
         return
-    created = r.json()
-    eid = created["id"]
-    cleanup_ids.add(eid)
-    original_desc = created.get("description")
-    print(f"  created id={eid[:8]}… description={original_desc!r}")
 
-    # PUT with NO description field (only type/title/date)
-    body = {
-        "type": "workshop",
-        "title": payload["title"],
-        "date": payload["date"],
-    }
-    r = requests.put(f"{BASE}/entries/{eid}", json=body, headers=ADMIN_HEADERS, timeout=20)
+    r = requests.get(f"{API}/entries?featured=true", timeout=20)
     if r.status_code != 200:
-        log_fail(f"PUT without description -> {r.status_code} {r.text[:300]}")
-        return
-    put_data = r.json()
-    print(f"    PUT resp description={put_data.get('description')!r}")
-
-    # GET to verify description preserved
-    r = requests.get(f"{BASE}/entries/{eid}", timeout=20)
-    if r.status_code != 200:
-        log_fail(f"GET after PUT -> {r.status_code} {r.text[:200]}")
-        return
-    got = r.json()
-    print(f"    GET description={got.get('description')!r}")
-
-    if got.get("description") == original_desc and original_desc:
-        log_pass("Description preserved when omitted from PUT body")
+        rec("GET /entries?featured=true -> 200", False, f"status={r.status_code}")
     else:
-        log_fail(
-            f"Description NOT preserved. original={original_desc!r} "
-            f"after_put={got.get('description')!r}"
+        ids = [e.get("id") for e in r.json()]
+        rec(
+            "past-dated featured entry hidden from public featured list",
+            eid not in ids,
+            f"count={len(ids)} contains_target={(eid in ids)}",
+        )
+
+    r = requests.get(f"{API}/entries?include_past=true", headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        rec("GET /entries?include_past=true -> 200 (test 3)", False, f"status={r.status_code}")
+    else:
+        ids = [e.get("id") for e in r.json()]
+        rec(
+            "past-dated featured entry appears in admin History",
+            eid in ids,
+            f"admin_history_count={len(ids)} contains_target={(eid in ids)}",
+        )
+
+    if created_ephemeral:
+        r = requests.delete(f"{API}/entries/{eid}", headers=ADMIN_HEADERS, timeout=20)
+        rec("cleanup ephemeral featured entry", r.status_code == 200, f"status={r.status_code}")
+    else:
+        restore = {"type": original_type, "title": original_title, "date": original_date, "featured": True}
+        r = requests.put(f"{API}/entries/{eid}", json=restore, headers=ADMIN_HEADERS, timeout=20)
+        rec(
+            "restore original date for featured entry",
+            r.status_code == 200,
+            f"status={r.status_code} restored_date={original_date}",
         )
 
 
-# ---------------------------------------------------------------------------
-# 3) DELETE works
-# ---------------------------------------------------------------------------
-
-def test_delete_entry() -> None:
-    section("3) DELETE /api/entries/{id}")
-
-    payload = {
-        "type": "workshop",
-        "title": "Regression test — delete me",
-        "date": "2027-03-01",
-        "description": "À supprimer",
-        "status": "approved",
-    }
-    r = requests.post(f"{BASE}/entries", json=payload, headers=ADMIN_HEADERS, timeout=20)
+# --------- 4) Duplicate endpoint ---------
+def test_4_duplicate():
+    r = requests.get(f"{API}/entries?type=workshop", timeout=20)
     if r.status_code != 200:
-        log_fail(f"seed POST /entries -> {r.status_code} {r.text[:200]}")
+        rec("GET /entries?type=workshop for duplicate seed", False, f"status={r.status_code}")
         return
-    eid = r.json()["id"]
-    print(f"  created id={eid[:8]}…")
-
-    r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=20)
-    if r.status_code == 200 and r.json().get("ok") is True:
-        log_pass("DELETE /entries/{id} returns 200 {ok:true}")
-    else:
-        log_fail(f"DELETE -> {r.status_code} {r.text[:200]}")
-        cleanup_ids.add(eid)
+    items = r.json()
+    source = next((e for e in items if e.get("status") in ("approved", "featured")), None)
+    if not source:
+        rec("seed approved workshop for duplicate", False, "no approved/featured workshop found")
         return
+    src_id = source["id"]
+    src_title = source.get("title") or ""
 
-    r = requests.get(f"{BASE}/entries/{eid}", timeout=20)
-    if r.status_code == 404:
-        log_pass("GET deleted entry -> 404")
-    else:
-        log_fail(f"GET deleted entry -> {r.status_code} {r.text[:200]}")
-
-
-# ---------------------------------------------------------------------------
-# 4) Approve with type query param (reclassification)
-# ---------------------------------------------------------------------------
-
-def test_approve_with_type_param() -> None:
-    section("4) POST /api/entries/{id}/approve?type=festival reclassifies")
-
-    payload = {
-        "type": "workshop",
-        "title": "Regression test — reclassify",
-        "date": "2027-04-04",
-        "description": "Sera reclassé en festival",
-        "submitter_name": "Yanet Fuentes",
-        "submitter_email": "yanet@example.org",
-    }
-    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=20)
+    r = requests.post(f"{API}/entries/{src_id}/duplicate", headers=ADMIN_HEADERS, timeout=20)
     if r.status_code != 200:
-        log_fail(f"submit -> {r.status_code} {r.text[:200]}")
+        rec("POST /entries/{id}/duplicate -> 200", False, f"status={r.status_code} body={r.text[:300]}")
         return
-    created = r.json()
-    eid = created["id"]
-    cleanup_ids.add(eid)
-    print(f"  submitted id={eid[:8]}… status={created.get('status')!r}")
-    if created.get("status") != "pending":
-        log_fail(f"expected status=pending after submit, got {created.get('status')!r}")
-        return
-    log_pass("submission returns status='pending'")
+    dup = r.json()
+    dup_id = dup.get("id")
+    checks = [
+        ("new id", bool(dup_id) and dup_id != src_id, f"src={src_id} dup={dup_id}"),
+        ("status='pending'", dup.get("status") == "pending", f"got={dup.get('status')}"),
+        ("featured=False", dup.get("featured") is False, f"got={dup.get('featured')}"),
+        ("source='manual'", dup.get("source") == "manual", f"got={dup.get('source')}"),
+        ("external_id None", dup.get("external_id") in (None, ""), f"got={dup.get('external_id')!r}"),
+        (
+            "title ends with ' (copie)'",
+            (dup.get("title") or "").endswith(" (copie)") and (dup.get("title") or "").startswith(src_title),
+            f"got={dup.get('title')!r}",
+        ),
+        ("date cleared to ''", dup.get("date") == "", f"got={dup.get('date')!r}"),
+    ]
+    for name, ok, detail in checks:
+        rec(f"duplicate: {name}", ok, detail)
 
-    r = requests.post(
-        f"{BASE}/entries/{eid}/approve",
-        params={"type": "festival"},
-        headers=ADMIN_HEADERS,
-        timeout=20,
+    r = requests.get(f"{API}/entries?status=pending", headers=ADMIN_HEADERS, timeout=20)
+    if r.status_code != 200:
+        rec("GET pending admin (duplicate)", False, f"status={r.status_code}")
+    else:
+        ids = [e.get("id") for e in r.json()]
+        rec("duplicate appears in /entries?status=pending", dup_id in ids, f"pending={len(ids)} contains_dup={dup_id in ids}")
+
+    r = requests.delete(f"{API}/entries/{dup_id}", headers=ADMIN_HEADERS, timeout=20)
+    rec("cleanup duplicate entry", r.status_code == 200, f"status={r.status_code}")
+
+
+# --------- 5) Sort: featured first, date asc ---------
+def test_5_sort():
+    r = requests.get(f"{API}/entries?type=workshop", timeout=20)
+    if r.status_code != 200:
+        rec("GET /entries?type=workshop for sort", False, f"status={r.status_code}")
+        return
+    items = r.json()
+    saw_approved = False
+    order_ok = True
+    order_detail = ""
+    for it in items:
+        if it.get("status") == "approved":
+            saw_approved = True
+        elif it.get("status") == "featured" and saw_approved:
+            order_ok = False
+            order_detail = f"featured after approved: id={it.get('id')}"
+            break
+    rec("workshops: featured come before approved", order_ok, order_detail or f"count={len(items)}")
+
+    def check_asc(group):
+        sub = [it for it in items if it.get("status") == group]
+        dates = [it.get("date") or "" for it in sub]
+        asc = all(dates[i] <= dates[i + 1] for i in range(len(dates) - 1))
+        return asc, dates
+
+    for grp in ("featured", "approved"):
+        asc, dates = check_asc(grp)
+        rec(f"workshops {grp}: dates ascending", asc, f"dates={dates}")
+
+
+# --------- 6) GCal sync skips past events ---------
+def test_6_gcal_sync():
+    r = requests.post(f"{API}/calendar/sync", headers=ADMIN_HEADERS, timeout=60)
+    if r.status_code != 200:
+        rec("POST /calendar/sync admin -> 200", False, f"status={r.status_code} body={r.text[:300]}")
+        return
+    stats = r.json()
+    rec(
+        "calendar/sync returns skipped counter",
+        isinstance(stats.get("skipped"), int) and stats.get("skipped") >= 0,
+        f"stats={stats}",
     )
-    if r.status_code != 200:
-        log_fail(f"approve?type=festival -> {r.status_code} {r.text[:200]}")
+
+    r3 = requests.get(f"{API}/entries?status=pending", headers=ADMIN_HEADERS, timeout=30)
+    if r3.status_code != 200:
+        rec("GET /entries?status=pending admin for gcal check", False, f"status={r3.status_code}")
         return
-    data = r.json()
-    print(f"    resp: type={data.get('type')!r} status={data.get('status')!r}")
-    if data.get("type") == "festival" and data.get("status") == "approved":
-        log_pass("approve?type=festival reclassifies to festival and approved")
-    else:
-        log_fail(f"approve?type=festival unexpected: {short(data)}")
-
-
-# ---------------------------------------------------------------------------
-# 5) Reject + restore round trip
-# ---------------------------------------------------------------------------
-
-def test_reject_restore_roundtrip() -> None:
-    section("5) Reject + restore round trip")
-
-    payload = {
-        "type": "soiree",
-        "title": "Regression test — reject then restore",
-        "date": "2027-05-10",
-        "venue": "Cabaret Sauvage",
-        "submitter_name": "Callesol",
-        "submitter_email": "callesol@example.org",
-    }
-    r = requests.post(f"{BASE}/entries/submit", json=payload, timeout=20)
-    if r.status_code != 200:
-        log_fail(f"submit soiree -> {r.status_code} {r.text[:200]}")
-        return
-    eid = r.json()["id"]
-    cleanup_ids.add(eid)
-    print(f"  submitted soiree id={eid[:8]}…")
-    if r.json().get("status") != "pending":
-        log_fail(f"expected pending, got {r.json().get('status')!r}")
-        return
-    log_pass("soiree submission -> status='pending'")
-
-    # reject
-    r = requests.post(f"{BASE}/entries/{eid}/reject", headers=ADMIN_HEADERS, timeout=20)
-    if r.status_code != 200:
-        log_fail(f"reject -> {r.status_code} {r.text[:200]}")
-        return
-    rdata = r.json()
-    print(f"    reject resp: {short(rdata)}")
-    if rdata.get("status") == "rejected" and rdata.get("ok") is True:
-        log_pass("reject returns {ok:true, status:'rejected'}")
-    else:
-        log_fail(f"reject unexpected: {short(rdata)}")
-
-    # admin can see it via ?status=rejected
-    r = requests.get(
-        f"{BASE}/entries",
-        params={"status": "rejected"},
-        headers=ADMIN_HEADERS,
-        timeout=20,
+    pending = r3.json()
+    gcal_pending = [e for e in pending if e.get("source") == "gcal"]
+    past_pending = [
+        e for e in gcal_pending
+        if not ensure_future(e.get("date") or "", e.get("end_date") or "")
+    ]
+    rec(
+        "all gcal pending entries are future (date >= today)",
+        len(past_pending) == 0,
+        f"gcal_pending={len(gcal_pending)} past_in_pending={len(past_pending)}"
+        + (f" examples={[(p.get('id'), p.get('date'), p.get('end_date')) for p in past_pending[:3]]}" if past_pending else ""),
     )
-    if r.status_code != 200:
-        log_fail(f"GET /entries?status=rejected -> {r.status_code} {r.text[:200]}")
-        return
-    rejected_list = r.json()
-    ids = {x["id"] for x in rejected_list}
-    if eid in ids:
-        log_pass(f"rejected entry present in admin archive (count={len(rejected_list)})")
-    else:
-        log_fail(f"rejected entry NOT in /entries?status=rejected (got {len(rejected_list)} items)")
-
-    # restore = approve
-    r = requests.post(f"{BASE}/entries/{eid}/approve", headers=ADMIN_HEADERS, timeout=20)
-    if r.status_code != 200:
-        log_fail(f"approve after reject -> {r.status_code} {r.text[:200]}")
-        return
-    data = r.json()
-    print(f"    approve-after-reject resp: status={data.get('status')!r} type={data.get('type')!r}")
-    if data.get("status") == "approved":
-        log_pass("approve after reject restores status='approved'")
-    else:
-        log_fail(f"approve after reject unexpected: {short(data)}")
 
 
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
+def main():
+    print(f"== Backend tests @ {API} ==")
+    print(f"TODAY Europe/Paris = {TODAY_STR}")
+    test_1_public_filters()
+    test_2_admin_history()
+    test_3_featured_past_hidden()
+    test_4_duplicate()
+    test_5_sort()
+    test_6_gcal_sync()
 
-def cleanup() -> None:
-    section("Cleanup")
-    for eid in list(cleanup_ids):
-        try:
-            r = requests.delete(f"{BASE}/entries/{eid}", headers=ADMIN_HEADERS, timeout=20)
-            print(f"  delete {eid[:8]}… -> {r.status_code}")
-        except Exception as e:
-            print(f"  cleanup failed for {eid[:8]}: {e}")
-
-
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    print(f"BASE = {BASE}")
-    try:
-        test_put_status_null_safe()
-        test_put_preserves_description()
-        test_delete_entry()
-        test_approve_with_type_param()
-        test_reject_restore_roundtrip()
-    finally:
-        cleanup()
-
-    print("\n" + "=" * 60)
-    print(f"PASS: {len(PASS)} | FAIL: {len(FAIL)}")
-    if FAIL:
-        print("\nFailures:")
-        for f in FAIL:
-            print(f"  - {f}")
-        return 1
-    print("All assertions passed.")
-    return 0
+    total = len(results)
+    failed = [r for r in results if not r[1]]
+    print("\n==================== SUMMARY ====================")
+    print(f"Total: {total}  Passed: {total - len(failed)}  Failed: {len(failed)}")
+    for name, ok, detail in results:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name} :: {detail}")
+    sys.exit(0 if not failed else 1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
