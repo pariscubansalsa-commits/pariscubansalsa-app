@@ -323,7 +323,7 @@ agent_communication:
 
   - task: "Admin entries — add reject + feature/unfeature actions"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/app/admin/entries.tsx"
     stuck_count: 0
     priority: "medium"
@@ -332,6 +332,18 @@ agent_communication:
         - working: "NA"
           agent: "main"
           comment: "Added Reject button (calls api.rejectEntry), Feature/Unfeature actions on approved items, and Validate+Feature shortcut on pending items."
+        - working: true
+          agent: "testing"
+          comment: |
+            E2E mobile (390x844) on https://rhythm-frames-3.preview.emergentagent.com/admin/entries with Bearer token via localStorage.pcs_session_token. ALL 7 SCENARIOS PASSED.
+            - S1 PASS: Topbar 'AGENDA & SORTIES' + gcal-sync-btn visible. À VALIDER tab default. 30 pending entries with GOOGLE CALENDAR label, RECLASSER EN row + 4 chips (SOIRÉE/WORKSHOP/FESTIVAL/SORTIE), and 3 action buttons (VALIDER, VALIDER + COUP DE CŒUR, REFUSER).
+            - S2 PASS: Manual sync via gcal-sync-btn produced yellow banner "Synchro OK — 0 nouveaux, 0 mis à jour, 30 inchangés" within 3s; auto-dismissed after ~5s.
+            - S3 PASS: Reclassified pending entry as SOIRÉE via set-type-{id}-soiree, then approve-{id} → entry disappeared from pending and appeared on filter-soiree tab (feature-{id} button present).
+            - S4 PASS: reject-{id} with auto-dialog handler → entry removed from pending, present in filter-rejected tab with restore-{id} button.
+            - S5 PASS: restore-{id} → entry removed from rejected and appeared in filter-agenda tab (gcal default type=agenda).
+            - S6 PASS: feature-pending-{id} → entry removed from pending; verified via API GET /api/entries/{id} that status='featured'.
+            - S7 PASS: On SOIRÉES tab, clicked feature-{id} on approved entry → after reload unfeature-{id} appeared. Clicked back → feature-{id} restored. Toggle works both directions.
+            No console errors during test. Note: localhost:3000 origin fails CORS due to credentials='include' against preview backend; testing must be performed against the preview URL (rhythm-frames-3.preview.emergentagent.com) directly — this is a test-environment quirk only, production uses same origin.
 
   - task: "Admin teachers — dance_styles chips + trusted_teacher toggle"
     implemented: true
@@ -352,11 +364,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Reject endpoint for pending entries"
-    - "Teacher model: dance_styles array field"
-    - "Submit entry with teacher_id auto-approve trusted teacher (existing)"
-    - "Teacher workshops endpoint (existing)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
