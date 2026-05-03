@@ -10,17 +10,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, TeacherItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
+import { DanceStyleChips, DanceStyle } from "./DanceStyle";
 
-type EntryTypeSubmit = "soiree" | "workshop";
+export type EntryTypeSubmit = "soiree" | "workshop" | "festival" | "agenda";
 
 const EMPTY = {
   title: "",
   date: "",
+  end_date: "",
   time: "",
+  end_time: "",
   venue: "",
   address: "",
   description: "",
@@ -30,47 +34,78 @@ const EMPTY = {
   price: "",
   category: "",
   ticket_link: "",
+  cover_photo: "" as string,
   submitter_name: "",
   submitter_email: "",
+  submitter_link: "",
 };
+
+const TYPE_OPTIONS: { v: EntryTypeSubmit; l: string }[] = [
+  { v: "soiree", l: "Soirée / concert" },
+  { v: "workshop", l: "Workshop" },
+  { v: "festival", l: "Festival" },
+  { v: "agenda", l: "Sortie / autre" },
+];
 
 const LEVELS = [
   { v: "beginner", l: "Débutant" },
   { v: "intermediate", l: "Intermédiaire" },
   { v: "advanced", l: "Avancé" },
 ];
-const CATEGORIES = [
-  { v: "salsa", l: "Salsa cubaine" },
-  { v: "afro-cuban", l: "Afro-cubain" },
-  { v: "rumba", l: "Rumba" },
-  { v: "son", l: "Son cubano" },
-  { v: "rueda", l: "Rueda de casino" },
-  { v: "other", l: "Autre" },
-];
 
 export default function SubmitEntryButton({
   type,
   presetTeacherId,
+  customLabel,
 }: {
   type: EntryTypeSubmit;
   presetTeacherId?: string;
+  /** Override the default button label */
+  customLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [currentType, setCurrentType] = useState<EntryTypeSubmit>(type);
   const [form, setForm] = useState({ ...EMPTY, teacher_id: presetTeacherId || "" });
+  const [danceStyle, setDanceStyle] = useState<DanceStyle>("multi_styles");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [teachers, setTeachers] = useState<TeacherItem[]>([]);
   const isLockedTeacher = !!presetTeacherId;
 
   useEffect(() => {
-    if (type === "workshop" && open && !isLockedTeacher && teachers.length === 0) {
+    if (open) setCurrentType(type);
+  }, [open, type]);
+
+  useEffect(() => {
+    if (currentType === "workshop" && open && !isLockedTeacher && teachers.length === 0) {
       api.listTeachers().then(setTeachers).catch(() => {});
     }
-  }, [type, open, isLockedTeacher, teachers.length]);
+  }, [currentType, open, isLockedTeacher, teachers.length]);
 
   const reset = () => {
     setForm({ ...EMPTY, teacher_id: presetTeacherId || "" });
+    setDanceStyle("multi_styles");
     setSuccess(false);
+  };
+
+  const pickImage = async () => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      // Limit to ~3MB raw to keep base64 reasonable
+      if (file.size > 3 * 1024 * 1024) {
+        window.alert("Image trop lourde (3 Mo max). Compressez-la avant l'envoi.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => setForm((f) => ({ ...f, cover_photo: String(reader.result) }));
+      reader.readAsDataURL(file);
+    };
+    input.click();
   };
 
   const submit = async () => {
@@ -80,23 +115,43 @@ export default function SubmitEntryButton({
       !form.submitter_name.trim() ||
       !form.submitter_email.trim()
     ) {
-      if (Platform.OS === "web")
-        window.alert("Titre, date, votre nom et votre email sont requis");
-      else Alert.alert("Champs manquants", "Titre, date, nom et email sont requis");
+      const msg = "Titre, date, votre nom et votre email sont obligatoires.";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Champs manquants", msg);
       return;
     }
     setSubmitting(true);
     try {
-      await api.submitEntry({ type, ...form });
+      await api.submitEntry({
+        type: currentType,
+        ...form,
+        dance_style: danceStyle,
+        cover_photo: form.cover_photo || null,
+      });
       setSuccess(true);
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur : " + e.message);
+      const msg = "Erreur : " + (e.message || "envoi impossible");
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Erreur", msg);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const label = type === "soiree" ? "PROPOSER UNE SOIRÉE" : "PROPOSER UN WORKSHOP";
+  const defaultLabel: Record<EntryTypeSubmit, string> = {
+    soiree: "PROPOSER UNE SOIRÉE",
+    workshop: "PROPOSER UN WORKSHOP",
+    festival: "PROPOSER UN FESTIVAL",
+    agenda: "PROPOSER UN EVENT",
+  };
+  const label = customLabel || defaultLabel[type];
+
+  const titleNoun: Record<EntryTypeSubmit, string> = {
+    soiree: "une soirée",
+    workshop: "un workshop",
+    festival: "un festival",
+    agenda: "un event",
+  };
 
   return (
     <>
@@ -129,13 +184,9 @@ export default function SubmitEntryButton({
             <View style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>
-                  {success
-                    ? "Merci !"
-                    : `Proposer ${
-                        type === "soiree" ? "une soirée" : "un workshop"
-                      }`}
+                  {success ? "Merci !" : `Proposer ${titleNoun[currentType]}`}
                 </Text>
-                <TouchableOpacity onPress={() => setOpen(false)}>
+                <TouchableOpacity testID="close-submit-modal" onPress={() => setOpen(false)}>
                   <Ionicons name="close" size={22} color={COLORS.primaryText} />
                 </TouchableOpacity>
               </View>
@@ -146,22 +197,33 @@ export default function SubmitEntryButton({
                     <Ionicons name="checkmark" size={32} color={COLORS.primaryText} />
                   </View>
                   <Text style={styles.successTxt}>
-                    Votre proposition est bien reçue. Nous la validerons sous peu et
-                    vous recontacterons si besoin à l&apos;adresse indiquée.
+                    Votre proposition est bien reçue. L&apos;équipe Paris Cuban Salsa la
+                    validera sous peu et vous recontactera à l&apos;adresse indiquée si
+                    besoin.
                   </Text>
-                  <TouchableOpacity
-                    style={styles.submitBtn}
-                    onPress={() => setOpen(false)}
-                  >
+                  <TouchableOpacity style={styles.submitBtn} onPress={() => setOpen(false)}>
                     <Text style={styles.submitTxt}>FERMER</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
                 <>
                   <Text style={styles.help}>
-                    Votre proposition sera soumise à validation par l&apos;équipe PCS
-                    avant d&apos;apparaître publiquement.
+                    Pas besoin de compte. Remplissez ce formulaire — votre proposition
+                    sera validée par l&apos;équipe avant d&apos;apparaître publiquement.
                   </Text>
+
+                  <Text style={styles.label}>TYPE D&apos;EVENT *</Text>
+                  <View style={styles.chipRow}>
+                    {TYPE_OPTIONS.map((opt) => (
+                      <Chip
+                        key={opt.v}
+                        label={opt.l}
+                        active={currentType === opt.v}
+                        onPress={() => setCurrentType(opt.v)}
+                        testID={`submit-type-${opt.v}`}
+                      />
+                    ))}
+                  </View>
 
                   <Field
                     label="TITRE *"
@@ -170,22 +232,47 @@ export default function SubmitEntryButton({
                     onChange={(v) => setForm({ ...form, title: v })}
                   />
                   <Field
-                    label="DATE (AAAA-MM-JJ) *"
+                    label="DATE * (AAAA-MM-JJ)"
                     testID="sub-date"
                     value={form.date}
                     onChange={(v) => setForm({ ...form, date: v })}
                     autoCapitalize="none"
-                    placeholder="2026-05-22"
+                    placeholder="2027-05-22"
                   />
+                  {currentType === "festival" && (
+                    <Field
+                      label="DATE DE FIN (AAAA-MM-JJ)"
+                      testID="sub-end-date"
+                      value={form.end_date}
+                      onChange={(v) => setForm({ ...form, end_date: v })}
+                      autoCapitalize="none"
+                      placeholder="2027-05-25"
+                    />
+                  )}
+
+                  <View style={styles.timeRow}>
+                    <View style={{ flex: 1 }}>
+                      <Field
+                        label="HEURE DÉBUT"
+                        testID="sub-time"
+                        value={form.time}
+                        onChange={(v) => setForm({ ...form, time: v })}
+                        placeholder="20:30"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Field
+                        label="HEURE FIN"
+                        testID="sub-end-time"
+                        value={form.end_time}
+                        onChange={(v) => setForm({ ...form, end_time: v })}
+                        placeholder="03:00"
+                      />
+                    </View>
+                  </View>
+
                   <Field
-                    label="HORAIRE"
-                    testID="sub-time"
-                    value={form.time}
-                    onChange={(v) => setForm({ ...form, time: v })}
-                    placeholder="20:30"
-                  />
-                  <Field
-                    label="LIEU"
+                    label="LIEU / SALLE"
                     testID="sub-venue"
                     value={form.venue}
                     onChange={(v) => setForm({ ...form, venue: v })}
@@ -198,8 +285,15 @@ export default function SubmitEntryButton({
                     onChange={(v) => setForm({ ...form, address: v })}
                     placeholder="59 Bd Macdonald, 75019 Paris"
                   />
+                  <Field
+                    label="DESCRIPTION"
+                    testID="sub-desc"
+                    value={form.description}
+                    onChange={(v) => setForm({ ...form, description: v })}
+                    multiline
+                  />
 
-                  {type === "workshop" && (
+                  {currentType === "workshop" && (
                     <>
                       <Field
                         label="PROFESSEUR / INTERVENANT"
@@ -207,8 +301,7 @@ export default function SubmitEntryButton({
                         value={form.instructor}
                         onChange={(v) => setForm({ ...form, instructor: v })}
                       />
-
-                      {!isLockedTeacher && (
+                      {!isLockedTeacher && teachers.length > 0 && (
                         <View style={{ marginTop: 10 }}>
                           <Text style={styles.label}>FICHE PROF (optionnel)</Text>
                           <ScrollView
@@ -226,28 +319,12 @@ export default function SubmitEntryButton({
                                 key={t.id}
                                 label={t.name}
                                 active={form.teacher_id === t.id}
-                                onPress={() =>
-                                  setForm({ ...form, teacher_id: t.id })
-                                }
+                                onPress={() => setForm({ ...form, teacher_id: t.id })}
                               />
                             ))}
                           </ScrollView>
                         </View>
                       )}
-
-                      {isLockedTeacher && (
-                        <View style={styles.lockedTeacher}>
-                          <Ionicons
-                            name="lock-closed"
-                            size={12}
-                            color={COLORS.primaryText}
-                          />
-                          <Text style={styles.lockedTeacherTxt}>
-                            Ce workshop sera rattaché à cette fiche artiste.
-                          </Text>
-                        </View>
-                      )}
-
                       <View style={{ marginTop: 10 }}>
                         <Text style={styles.label}>NIVEAU</Text>
                         <View style={styles.chipRow}>
@@ -266,45 +343,27 @@ export default function SubmitEntryButton({
                           ))}
                         </View>
                       </View>
-
-                      <View style={{ marginTop: 10 }}>
-                        <Text style={styles.label}>CATÉGORIE</Text>
-                        <View style={styles.chipRow}>
-                          {CATEGORIES.map((opt) => (
-                            <Chip
-                              key={opt.v}
-                              label={opt.l}
-                              active={form.category === opt.v}
-                              onPress={() =>
-                                setForm({
-                                  ...form,
-                                  category: form.category === opt.v ? "" : opt.v,
-                                })
-                              }
-                            />
-                          ))}
-                        </View>
-                      </View>
-
-                      <Field
-                        label="PRIX"
-                        testID="sub-price"
-                        value={form.price}
-                        onChange={(v) => setForm({ ...form, price: v })}
-                        placeholder="25€ ou Gratuit"
-                      />
                     </>
                   )}
 
+                  <View style={{ marginTop: 14 }}>
+                    <DanceStyleChips
+                      value={danceStyle}
+                      onChange={setDanceStyle}
+                      required
+                      testIDPrefix="sub-style"
+                    />
+                  </View>
+
                   <Field
-                    label="DESCRIPTION"
-                    testID="sub-desc"
-                    value={form.description}
-                    onChange={(v) => setForm({ ...form, description: v })}
-                    multiline
+                    label="PRIX"
+                    testID="sub-price"
+                    value={form.price}
+                    onChange={(v) => setForm({ ...form, price: v })}
+                    placeholder="25€ ou Gratuit"
                   />
                   <Field
-                    label="LIEN TICKET / BILLETTERIE"
+                    label="LIEN BILLETTERIE"
                     testID="sub-ticket"
                     value={form.ticket_link}
                     onChange={(v) => setForm({ ...form, ticket_link: v })}
@@ -312,11 +371,39 @@ export default function SubmitEntryButton({
                     placeholder="https://www.helloasso.com/..."
                   />
 
+                  <Text style={[styles.label, { marginTop: 14 }]}>IMAGE / AFFICHE</Text>
+                  {form.cover_photo ? (
+                    <View style={styles.imagePreviewWrap}>
+                      <Image
+                        source={{ uri: form.cover_photo }}
+                        style={styles.imagePreview}
+                        resizeMode="cover"
+                      />
+                      <TouchableOpacity
+                        testID="sub-cover-remove"
+                        style={styles.imageRemove}
+                        onPress={() => setForm({ ...form, cover_photo: "" })}
+                      >
+                        <Ionicons name="close-circle" size={20} color="#fff" />
+                        <Text style={styles.imageRemoveTxt}>Retirer</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      testID="sub-cover-upload"
+                      style={styles.imageBtn}
+                      onPress={pickImage}
+                    >
+                      <Ionicons name="image-outline" size={18} color={COLORS.primaryText} />
+                      <Text style={styles.imageBtnTxt}>CHOISIR UNE IMAGE</Text>
+                    </TouchableOpacity>
+                  )}
+
                   <View style={styles.divider} />
                   <Text style={styles.section}>VOS COORDONNÉES</Text>
 
                   <Field
-                    label="VOTRE NOM *"
+                    label="VOTRE NOM / STRUCTURE *"
                     testID="sub-name"
                     value={form.submitter_name}
                     onChange={(v) => setForm({ ...form, submitter_name: v })}
@@ -329,6 +416,14 @@ export default function SubmitEntryButton({
                     autoCapitalize="none"
                     placeholder="contact@votre-asso.fr"
                   />
+                  <Field
+                    label="INSTAGRAM OU SITE WEB"
+                    testID="sub-link"
+                    value={form.submitter_link}
+                    onChange={(v) => setForm({ ...form, submitter_link: v })}
+                    autoCapitalize="none"
+                    placeholder="@votreasso ou https://..."
+                  />
 
                   <TouchableOpacity
                     testID="submit-btn"
@@ -337,9 +432,7 @@ export default function SubmitEntryButton({
                     disabled={submitting}
                   >
                     <Text style={styles.submitTxt}>
-                      {submitting
-                        ? "ENVOI EN COURS..."
-                        : "ENVOYER POUR VALIDATION"}
+                      {submitting ? "ENVOI EN COURS..." : "ENVOYER POUR VALIDATION"}
                     </Text>
                   </TouchableOpacity>
                 </>
@@ -356,19 +449,20 @@ function Chip({
   label,
   active,
   onPress,
+  testID,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  testID?: string;
 }) {
   return (
     <TouchableOpacity
       onPress={onPress}
+      testID={testID}
       style={[styles.chip, active && styles.chipActive]}
     >
-      <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>
-        {label}
-      </Text>
+      <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -446,22 +540,49 @@ const styles = StyleSheet.create({
     color: COLORS.primaryText,
   },
   chipTxtActive: { color: COLORS.accentYellow },
-  lockedTeacher: {
+  timeRow: { flexDirection: "row", gap: 10 },
+  imageBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#FFFBEA",
+    justifyContent: "center",
+    gap: 8,
     borderWidth: 1,
-    borderColor: COLORS.accentYellow,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginTop: 10,
-    borderRadius: 6,
+    borderStyle: "dashed",
+    borderColor: COLORS.border,
+    paddingVertical: 18,
+    borderRadius: 10,
+    marginTop: 4,
   },
-  lockedTeacherTxt: {
+  imageBtnTxt: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
+    letterSpacing: 1.2,
     color: COLORS.primaryText,
+  },
+  imagePreviewWrap: { position: "relative", marginTop: 4 },
+  imagePreview: {
+    width: "100%",
+    height: 160,
+    borderRadius: 10,
+    backgroundColor: COLORS.surface,
+  },
+  imageRemove: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  imageRemoveTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    color: "#fff",
+    letterSpacing: 0.5,
   },
   backdrop: { flex: 1, backgroundColor: COLORS.overlay },
   sheetWrap: { flexGrow: 1, justifyContent: "flex-end" },
@@ -488,7 +609,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: COLORS.secondaryText,
-    marginBottom: 6,
+    marginBottom: 12,
   },
   label: {
     fontFamily: FONTS.bodyBold,

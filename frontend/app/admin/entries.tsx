@@ -361,6 +361,7 @@ export default function AdminEntries() {
                       {sourceLabel}
                       {e.submitter_name ? ` · ${e.submitter_name}` : ""}
                       {e.submitter_email ? ` · ${e.submitter_email}` : ""}
+                      {(e as any).submitter_link ? ` · ${(e as any).submitter_link}` : ""}
                     </Text>
                     {(e.is_recurrence_master || !!e.parent_id) && (
                       <View style={styles.recurrentBadge}>

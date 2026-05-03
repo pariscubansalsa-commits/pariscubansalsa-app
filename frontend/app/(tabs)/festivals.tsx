@@ -1,6 +1,7 @@
 import React from "react";
 import { Text } from "react-native";
 import EntriesScreen from "../../src/EntriesScreen";
+import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS } from "../../src/theme";
 
 export default function Festivals() {
@@ -23,6 +24,7 @@ export default function Festivals() {
         </>
       }
       subtitle="Calendrier des festivals de salsa cubaine en France et en Europe. Réservez vos vacances dansantes."
+      headerExtra={<SubmitEntryButton type="festival" />}
       showDanceStyleFilter
     />
   );

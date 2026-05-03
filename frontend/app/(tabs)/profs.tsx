@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, TeacherItem } from "../../src/api";
 import TopBar from "../../src/TopBar";
+import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -141,6 +142,10 @@ export default function Artistes() {
                 />
               ))}
             </ScrollView>
+
+            <View style={{ paddingTop: 6, paddingBottom: 4 }}>
+              <SubmitEntryButton type="workshop" />
+            </View>
           </View>
         }
         renderItem={({ item }) => (

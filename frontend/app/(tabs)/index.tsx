@@ -1,6 +1,7 @@
 import React from "react";
 import { Text } from "react-native";
 import EntriesScreen from "../../src/EntriesScreen";
+import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS } from "../../src/theme";
 
 export default function Index() {
@@ -25,6 +26,7 @@ export default function Index() {
       }
       subtitle="L'agenda vivant de la communauté Paris Cuban Salsa — soirées, workshops, festivals. Actualisé en permanence."
       handleAuthCallback
+      headerExtra={<SubmitEntryButton type="agenda" customLabel="+ PROPOSER UN EVENT" />}
     />
   );
 }

@@ -126,6 +126,7 @@ class Entry(BaseModel):
     date: str
     end_date: Optional[str] = None
     time: Optional[str] = ""
+    end_time: Optional[str] = ""
     venue: Optional[str] = ""
     address: Optional[str] = ""
     description: Optional[str] = ""
@@ -146,6 +147,7 @@ class Entry(BaseModel):
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
     submitter_email: Optional[str] = ""
+    submitter_link: Optional[str] = ""
     submitted_by: Optional[str] = None  # user_id of the user who submitted (organizer/artist)
     source: str = "manual"  # 'manual' | 'gcal' | 'submission' | 'organizer' | 'artiste'
     external_id: Optional[str] = None  # iCal UID for gcal sync
@@ -179,7 +181,9 @@ class EntrySubmit(BaseModel):
     type: str
     title: str
     date: str
+    end_date: Optional[str] = None
     time: Optional[str] = ""
+    end_time: Optional[str] = ""
     venue: Optional[str] = ""
     address: Optional[str] = ""
     description: Optional[str] = ""
@@ -193,6 +197,7 @@ class EntrySubmit(BaseModel):
     cover_photo: Optional[str] = None
     submitter_name: str
     submitter_email: str
+    submitter_link: Optional[str] = ""  # Instagram or website
 
 
 class Teacher(BaseModel):
@@ -760,25 +765,32 @@ async def list_entries(
 
 @api_router.post("/entries/submit", response_model=Entry)
 async def submit_entry(payload: EntrySubmit):
-    """Public endpoint: teachers/organizers submit an event for admin review."""
-    if payload.type not in {"soiree", "workshop"}:
-        raise HTTPException(status_code=400, detail="Seuls soirées et workshops sont acceptés")
+    """Public endpoint: anyone (no auth required) can submit an event for admin review.
+
+    Accepts the 4 entry types (soiree, workshop, festival, agenda). The event
+    lands in the admin pending queue, with the submitter's contact info
+    (name, email, optional link).
+    """
+    if payload.type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Type d'event invalide")
     if not payload.submitter_name.strip() or not payload.submitter_email.strip():
         raise HTTPException(status_code=400, detail="Nom et email requis")
+    if not payload.title.strip() or not payload.date.strip():
+        raise HTTPException(status_code=400, detail="Titre et date requis")
 
     data = payload.dict()
     data["dance_style"] = normalize_dance_style(data.get("dance_style"))
 
-    # Trusted teacher → auto-approve
+    # Trusted teacher → auto-approve workshops
     auto_approved = False
-    if data.get("teacher_id"):
+    if data.get("teacher_id") and payload.type == "workshop":
         teacher = await db.teachers.find_one({"id": data["teacher_id"]}, {"_id": 0})
         if teacher and teacher.get("trusted_teacher"):
             auto_approved = True
 
     data["status"] = "approved" if auto_approved else "pending"
     data["featured"] = False
-    data["end_date"] = None
+    data["source"] = "submission"
     entry = Entry(**data)
     await db.entries.insert_one(entry.dict())
     return entry
