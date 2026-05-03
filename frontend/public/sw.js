@@ -5,7 +5,7 @@
  * - Falls back to /offline.html when both network and cache miss.
  */
 
-const CACHE_VERSION = "pcs-v1.0.0";
+const CACHE_VERSION = "pcs-v1.1.0";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
