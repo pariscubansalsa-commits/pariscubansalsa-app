@@ -93,6 +93,32 @@ class PhotosUpload(BaseModel):
 
 
 # Generic entry for agenda / soirées / workshops / festivals
+DANCE_STYLES = {"salsa_cubaine", "on2", "multi_styles", "autre"}
+DEFAULT_DANCE_STYLE = "multi_styles"
+
+# Recurrence ----------------------------------------------------------------
+RECURRENCE_FREQS = {
+    "none",           # Not recurring
+    "daily",          # Every N days
+    "weekly",         # Every N weeks (same weekday)
+    "biweekly",       # Alias: weekly with interval=2
+    "monthly_weekday",# Every N months, same weekday of month (e.g. 2nd Friday)
+    "monthly_date",   # Every N months, same date of month
+    "custom",         # Raw RRULE string provided
+}
+
+
+class Recurrence(BaseModel):
+    """Defines how an entry repeats. Stored on the "master" entry; each
+    generated occurrence has `parent_id` pointing to the master."""
+    freq: str = "none"  # see RECURRENCE_FREQS
+    interval: int = 1
+    until: Optional[str] = None  # "YYYY-MM-DD" inclusive
+    count: Optional[int] = None  # stop after N occurrences
+    byweekday: Optional[List[int]] = None  # 0=Mon..6=Sun (for custom weekly)
+    rrule: Optional[str] = None  # raw RRULE for custom
+
+
 class Entry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str
@@ -107,8 +133,14 @@ class Entry(BaseModel):
     teacher_id: Optional[str] = None
     level: Optional[str] = ""  # 'beginner' | 'intermediate' | 'advanced' | ''
     price: Optional[str] = ""  # free text e.g. "25€" or "Gratuit"
-    category: Optional[str] = ""  # 'salsa' | 'afro-cuban' | 'rumba' | 'son' | 'rueda' | ''
+    category: Optional[str] = ""  # legacy free-text style — kept for back-compat
+    dance_style: str = DEFAULT_DANCE_STYLE  # 'salsa_cubaine' | 'on2' | 'multi_styles' | 'autre'
     ticket_link: Optional[str] = ""
+    # Recurrence metadata ------------------------------------------------
+    recurrence: Optional[Recurrence] = None
+    parent_id: Optional[str] = None  # set on each generated occurrence
+    is_recurrence_master: bool = False
+    occurrence_index: Optional[int] = None  # 0, 1, 2… for each child
     cover_photo: Optional[str] = None
     featured: bool = False  # legacy: use status='featured' instead
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
@@ -135,10 +167,12 @@ class EntryCreate(BaseModel):
     level: Optional[str] = ""
     price: Optional[str] = ""
     category: Optional[str] = ""
+    dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
     featured: bool = False
     status: Optional[str] = None
+    recurrence: Optional[Recurrence] = None
 
 
 class EntrySubmit(BaseModel):
@@ -154,6 +188,7 @@ class EntrySubmit(BaseModel):
     level: Optional[str] = ""
     price: Optional[str] = ""
     category: Optional[str] = ""
+    dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
     submitter_name: str
@@ -514,6 +549,129 @@ async def root():
 VALID_TYPES = {"agenda", "soiree", "workshop", "festival"}
 
 
+def normalize_dance_style(value: Optional[str]) -> str:
+    """Validate dance_style. Returns the value if valid, else default."""
+    if not value:
+        return DEFAULT_DANCE_STYLE
+    if value not in DANCE_STYLES:
+        raise HTTPException(status_code=400, detail=f"dance_style invalide. Doit être l'un de: {', '.join(sorted(DANCE_STYLES))}")
+    return value
+
+
+# ========= Recurrence =========
+
+RECURRENCE_WINDOW_MONTHS = 3  # when no until/count, generate 3 months ahead
+
+
+def _parse_date_str(s: str) -> datetime:
+    return datetime.strptime(s[:10], "%Y-%m-%d")
+
+
+def _fmt_date(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d")
+
+
+def expand_recurrence_dates(base_date: str, rec: dict) -> List[str]:
+    """Return a list of ISO dates (YYYY-MM-DD) for the given recurrence rule.
+
+    Skips the base_date itself (it is the master) and returns subsequent
+    occurrences. Bounded by `until` (inclusive), `count`, or a 3-month
+    rolling window."""
+    from dateutil.rrule import rrule, DAILY, WEEKLY, MONTHLY
+    from dateutil.relativedelta import relativedelta
+
+    freq = (rec or {}).get("freq", "none")
+    if freq in {"none", None, ""}:
+        return []
+    start = _parse_date_str(base_date)
+    interval = int(rec.get("interval") or 1)
+
+    freq_map = {
+        "daily": DAILY,
+        "weekly": WEEKLY,
+        "biweekly": WEEKLY,
+        "monthly_weekday": MONTHLY,
+        "monthly_date": MONTHLY,
+    }
+    if freq == "biweekly":
+        interval = 2
+    if freq == "custom":
+        # Custom RRULE string not implemented for MVP; fall back to no expansion
+        return []
+    rrule_freq = freq_map.get(freq)
+    if rrule_freq is None:
+        return []
+
+    kwargs = {"dtstart": start, "interval": interval}
+    # monthly_weekday uses byweekday=start's weekday with occurrence index
+    # dateutil default behavior for MONTHLY is to repeat on same day-of-month,
+    # which is what monthly_date wants. For monthly_weekday we set bysetpos.
+    if freq == "monthly_weekday":
+        from dateutil.rrule import MO, TU, WE, TH, FR, SA, SU
+        wd_map = [MO, TU, WE, TH, FR, SA, SU]
+        # Which weekday of the month is base_date? e.g. 2nd Friday
+        day_in_month = start.day
+        week_index = (day_in_month - 1) // 7 + 1  # 1..5
+        kwargs["byweekday"] = wd_map[start.weekday()]
+        kwargs["bysetpos"] = week_index
+
+    until_str = rec.get("until")
+    count = rec.get("count")
+    if until_str:
+        kwargs["until"] = _parse_date_str(until_str)
+    elif count:
+        # count includes the master; generate (count - 1) additional + skip first
+        kwargs["count"] = int(count)
+    else:
+        # 3-month rolling window
+        kwargs["until"] = start + relativedelta(months=+RECURRENCE_WINDOW_MONTHS)
+
+    dates = list(rrule(rrule_freq, **kwargs))
+    # Drop the first one (it's the master/base)
+    if dates and dates[0].date() == start.date():
+        dates = dates[1:]
+    # Cap at 100 occurrences defensively
+    dates = dates[:100]
+    return [_fmt_date(d) for d in dates]
+
+
+async def generate_occurrences(master: dict) -> int:
+    """Create occurrence documents for a master entry.
+
+    Returns the count created. Idempotent: skips dates that already exist
+    for this parent_id."""
+    rec = master.get("recurrence") or {}
+    if not rec or rec.get("freq") in {"none", None, ""}:
+        return 0
+    dates = expand_recurrence_dates(master["date"], rec)
+    if not dates:
+        return 0
+
+    # Find existing occurrence dates to avoid dupes
+    existing_cursor = db.entries.find(
+        {"parent_id": master["id"]}, {"_id": 0, "date": 1}
+    )
+    existing_dates = {d["date"] async for d in existing_cursor}
+
+    created = 0
+    for idx, d in enumerate(dates, start=1):
+        if d in existing_dates:
+            continue
+        child = {
+            k: v for k, v in master.items()
+            if k not in {"_id", "id", "recurrence", "is_recurrence_master", "parent_id", "occurrence_index"}
+        }
+        child["id"] = str(uuid.uuid4())
+        child["date"] = d
+        child["parent_id"] = master["id"]
+        child["is_recurrence_master"] = False
+        child["occurrence_index"] = idx
+        child["recurrence"] = None
+        await db.entries.insert_one(child)
+        created += 1
+    return created
+
+
 @api_router.get("/entries", response_model=List[Entry])
 async def list_entries(
     request: Request,
@@ -522,6 +680,7 @@ async def list_entries(
     status: Optional[str] = None,
     level: Optional[str] = None,
     category: Optional[str] = None,
+    dance_style: Optional[str] = None,
     teacher_id: Optional[str] = None,
     include_past: Optional[bool] = False,
 ):
@@ -546,6 +705,10 @@ async def list_entries(
         query["level"] = level
     if category:
         query["category"] = category
+    if dance_style:
+        if dance_style not in DANCE_STYLES:
+            raise HTTPException(status_code=400, detail="Invalid dance_style")
+        query["dance_style"] = dance_style
     if teacher_id:
         query["teacher_id"] = teacher_id
 
@@ -604,6 +767,7 @@ async def submit_entry(payload: EntrySubmit):
         raise HTTPException(status_code=400, detail="Nom et email requis")
 
     data = payload.dict()
+    data["dance_style"] = normalize_dance_style(data.get("dance_style"))
 
     # Trusted teacher → auto-approve
     auto_approved = False
@@ -732,31 +896,95 @@ async def create_entry(payload: EntryCreate, _user: User = Depends(require_admin
     if payload.type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid type")
     data = payload.dict()
+    data["dance_style"] = normalize_dance_style(data.get("dance_style"))
     if not data.get("status"):
         data["status"] = "featured" if data.get("featured") else "approved"
+    # Detect recurrence intent
+    rec = data.get("recurrence") or {}
+    has_recurrence = rec and rec.get("freq") not in {None, "", "none"}
+    if has_recurrence:
+        data["is_recurrence_master"] = True
     entry = Entry(**data)
-    await db.entries.insert_one(entry.dict())
+    doc = entry.dict()
+    await db.entries.insert_one(doc)
+    if has_recurrence:
+        created = await generate_occurrences(doc)
+        logger.info("Created %s occurrences for master %s", created, doc["id"])
     return entry
 
 
+@api_router.post("/entries/{entry_id}/regenerate-occurrences")
+async def regenerate_occurrences(
+    entry_id: str,
+    _user: User = Depends(require_admin),
+):
+    """Regenerate missing occurrences for a recurrence master (used when the
+    rolling 3-month window advances, or after editing the master's recurrence
+    rule)."""
+    master = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not master:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if not master.get("is_recurrence_master"):
+        raise HTTPException(status_code=400, detail="Cette entrée n'est pas un maître de récurrence")
+    created = await generate_occurrences(master)
+    return {"ok": True, "created": created}
+
+
 @api_router.put("/entries/{entry_id}", response_model=Entry)
-async def update_entry(entry_id: str, payload: EntryCreate, _user: User = Depends(require_admin)):
+async def update_entry(
+    entry_id: str,
+    payload: EntryCreate,
+    scope: Optional[str] = "this",
+    _user: User = Depends(require_admin),
+):
+    """Update an entry. For recurring events, `scope` controls the reach:
+    - 'this' (default): only this occurrence
+    - 'future': this occurrence and all following occurrences (same parent_id)
+    - 'all': this + all siblings + master
+    """
     if payload.type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid type")
+    if scope not in {"this", "future", "all"}:
+        raise HTTPException(status_code=400, detail="scope must be 'this' | 'future' | 'all'")
     existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entry not found")
     # Only update fields the client actually sent — preserves existing values
-    # for omitted optional string fields like description/venue/etc.
     update = payload.dict(exclude_unset=True)
-    # If the client sent featured, sync the moderation status accordingly
+    # Do not let scope updates mutate recurrence metadata on children
+    if not existing.get("is_recurrence_master"):
+        update.pop("recurrence", None)
+    if "dance_style" in update:
+        update["dance_style"] = normalize_dance_style(update["dance_style"])
     if "featured" in update:
         if update["featured"]:
             update["status"] = "featured"
         else:
             if existing.get("status") == "featured":
                 update["status"] = "approved"
-    await db.entries.update_one({"id": entry_id}, {"$set": update})
+
+    # Determine ID set to update
+    ids_to_update = [entry_id]
+    if scope in {"future", "all"} and (existing.get("parent_id") or existing.get("is_recurrence_master")):
+        master_id = existing.get("parent_id") or existing["id"]
+        sibling_query: dict = {"$or": [{"id": master_id}, {"parent_id": master_id}]}
+        siblings = await db.entries.find(sibling_query, {"_id": 0, "id": 1, "date": 1}).to_list(500)
+        if scope == "future":
+            ids_to_update = [s["id"] for s in siblings if s["date"] >= existing["date"]]
+        else:  # all
+            ids_to_update = [s["id"] for s in siblings]
+
+    # For bulk updates we cannot change the date (would create collisions)
+    bulk_update = {k: v for k, v in update.items() if k != "date"}
+    if len(ids_to_update) > 1 and "date" in update:
+        # Only the single entry gets the date change
+        await db.entries.update_one({"id": entry_id}, {"$set": update})
+        other_ids = [i for i in ids_to_update if i != entry_id]
+        if other_ids and bulk_update:
+            await db.entries.update_many({"id": {"$in": other_ids}}, {"$set": bulk_update})
+    else:
+        await db.entries.update_many({"id": {"$in": ids_to_update}}, {"$set": update})
+
     merged = {**existing, **update, "id": entry_id}
     if not merged.get("status"):
         merged["status"] = "approved"
@@ -764,9 +992,30 @@ async def update_entry(entry_id: str, payload: EntryCreate, _user: User = Depend
 
 
 @api_router.delete("/entries/{entry_id}")
-async def delete_entry(entry_id: str, _user: User = Depends(require_admin)):
-    await db.entries.delete_one({"id": entry_id})
-    return {"ok": True}
+async def delete_entry(
+    entry_id: str,
+    scope: Optional[str] = "this",
+    _user: User = Depends(require_admin),
+):
+    """Delete an entry. `scope` semantics identical to update_entry."""
+    if scope not in {"this", "future", "all"}:
+        raise HTTPException(status_code=400, detail="scope must be 'this' | 'future' | 'all'")
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    ids_to_delete = [entry_id]
+    if scope in {"future", "all"} and (existing.get("parent_id") or existing.get("is_recurrence_master")):
+        master_id = existing.get("parent_id") or existing["id"]
+        sibling_query: dict = {"$or": [{"id": master_id}, {"parent_id": master_id}]}
+        siblings = await db.entries.find(sibling_query, {"_id": 0, "id": 1, "date": 1}).to_list(500)
+        if scope == "future":
+            ids_to_delete = [s["id"] for s in siblings if s["date"] >= existing["date"]]
+        else:
+            ids_to_delete = [s["id"] for s in siblings]
+
+    result = await db.entries.delete_many({"id": {"$in": ids_to_delete}})
+    return {"ok": True, "deleted": result.deleted_count}
 
 
 @api_router.post("/entries/{entry_id}/duplicate", response_model=Entry)
@@ -1227,6 +1476,7 @@ class OrganizerEntryInput(BaseModel):
     level: Optional[str] = ""
     price: Optional[str] = ""
     category: Optional[str] = ""
+    dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
 
@@ -1242,6 +1492,7 @@ async def organisateur_create_entry(
     if not payload.title.strip() or not payload.date.strip():
         raise HTTPException(status_code=400, detail="Titre et date requis")
     data = payload.dict()
+    data["dance_style"] = normalize_dance_style(data.get("dance_style"))
     data["status"] = "pending"
     data["featured"] = False
     data["submitter_name"] = (user.organizer.structure_name if user.organizer else user.name) or user.name
@@ -1268,6 +1519,8 @@ async def organisateur_update_entry(
     if existing.get("status") not in {"pending", None}:
         raise HTTPException(status_code=403, detail="Seuls les événements en attente sont modifiables")
     update = payload.dict(exclude_unset=True)
+    if "dance_style" in update:
+        update["dance_style"] = normalize_dance_style(update["dance_style"])
     update["status"] = "pending"
     await db.entries.update_one({"id": entry_id}, {"$set": update})
     merged = {**existing, **update, "id": entry_id}
@@ -1356,6 +1609,7 @@ class ArtisteWorkshopInput(BaseModel):
     level: Optional[str] = ""
     price: Optional[str] = ""
     category: Optional[str] = ""
+    dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     cover_photo: Optional[str] = None
 
@@ -1370,6 +1624,7 @@ async def artiste_create_workshop(
     if not payload.title.strip() or not payload.date.strip():
         raise HTTPException(status_code=400, detail="Titre et date requis")
     data = payload.dict()
+    data["dance_style"] = normalize_dance_style(data.get("dance_style"))
     data["type"] = "workshop"
     data["teacher_id"] = user.artist_teacher_id
     data["instructor"] = user.name
@@ -1398,6 +1653,8 @@ async def artiste_update_workshop(
     if existing.get("status") not in {"pending", None}:
         raise HTTPException(status_code=403, detail="Seuls les workshops en attente sont modifiables")
     update = payload.dict(exclude_unset=True)
+    if "dance_style" in update:
+        update["dance_style"] = normalize_dance_style(update["dance_style"])
     update["status"] = "pending"
     update["type"] = "workshop"
     update["teacher_id"] = user.artist_teacher_id

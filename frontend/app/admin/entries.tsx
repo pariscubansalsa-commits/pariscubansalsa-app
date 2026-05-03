@@ -18,6 +18,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { api, EntryItem, EntryType } from "../../src/api";
 import EntryCard from "../../src/EntryCard";
+import { DanceStyleBadge, DanceStyleChips, DanceStyle } from "../../src/DanceStyle";
+import RecurrenceSection, { Recurrence, RecurrenceScopeChooser } from "../../src/Recurrence";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
@@ -44,6 +46,8 @@ const EMPTY = {
   ticket_link: "",
   cover_photo: null as string | null,
   featured: false,
+  dance_style: "multi_styles" as DanceStyle,
+  recurrence: { freq: "none" } as Recurrence,
 };
 
 export default function AdminEntries() {
@@ -109,6 +113,8 @@ export default function AdminEntries() {
       ticket_link: e.ticket_link || "",
       cover_photo: e.cover_photo || null,
       featured: !!e.featured,
+      dance_style: (e.dance_style as DanceStyle) || "multi_styles",
+      recurrence: (e.recurrence as Recurrence) || { freq: "none" },
     });
     setModalOpen(true);
   };
@@ -356,6 +362,19 @@ export default function AdminEntries() {
                       {e.submitter_name ? ` · ${e.submitter_name}` : ""}
                       {e.submitter_email ? ` · ${e.submitter_email}` : ""}
                     </Text>
+                    {(e.is_recurrence_master || !!e.parent_id) && (
+                      <View style={styles.recurrentBadge}>
+                        <Ionicons name="repeat" size={11} color={COLORS.primaryText} />
+                        <Text style={styles.recurrentBadgeTxt}>
+                          {e.is_recurrence_master ? "RÉCURRENT" : "OCCURRENCE"}
+                        </Text>
+                      </View>
+                    )}
+                    {!!e.dance_style && (
+                      <View style={{ marginLeft: "auto" }}>
+                        <DanceStyleBadge style={e.dance_style} size="md" />
+                      </View>
+                    )}
                   </View>
                 )}
                 <EntryCard
@@ -520,6 +539,21 @@ export default function AdminEntries() {
               )}
               <Field label="DESCRIPTION" testID="entry-description" value={form.description} onChange={(v) => setForm({ ...form, description: v })} multiline />
               <Field label="LIEN TICKET (URL)" testID="entry-ticket" value={form.ticket_link} onChange={(v) => setForm({ ...form, ticket_link: v })} placeholder="https://www.helloasso.com/..." autoCapitalize="none" />
+
+              <View style={{ marginTop: 20 }}>
+                <DanceStyleChips
+                  value={(form.dance_style as DanceStyle) || "multi_styles"}
+                  onChange={(v) => setForm({ ...form, dance_style: v })}
+                  required
+                  testIDPrefix="entry-style"
+                />
+              </View>
+
+              <RecurrenceSection
+                value={form.recurrence}
+                onChange={(rec) => setForm({ ...form, recurrence: rec })}
+                isEditingMaster={!!editing?.is_recurrence_master}
+              />
 
               <Text style={[styles.label, { marginTop: 14 }]}>PHOTO / AFFICHE</Text>
               <TouchableOpacity testID="entry-cover-picker" style={styles.coverPicker} onPress={pickCover}>
@@ -791,6 +825,21 @@ const styles = StyleSheet.create({
   pendingMetaTxt: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
+    color: COLORS.primaryText,
+  },
+  recurrentBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: COLORS.accentYellow,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    marginLeft: 6,
+  },
+  recurrentBadgeTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 9,
+    letterSpacing: 0.8,
     color: COLORS.primaryText,
   },
   approveBtn: {

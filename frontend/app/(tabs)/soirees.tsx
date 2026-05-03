@@ -25,6 +25,7 @@ export default function Soirees() {
       }
       subtitle="Les rendez-vous mensuels et concerts live de la scène cubaine parisienne — Callesol, Cabeza Loca, CUBAILA & Cie."
       headerExtra={<SubmitEntryButton type="soiree" />}
+      showDanceStyleFilter
     />
   );
 }

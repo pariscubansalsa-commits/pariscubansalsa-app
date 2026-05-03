@@ -48,6 +48,16 @@ export type EntryItem = {
   level?: string;
   price?: string;
   category?: string;
+  dance_style?: "salsa_cubaine" | "on2" | "multi_styles" | "autre";
+  recurrence?: {
+    freq: string;
+    interval?: number;
+    until?: string | null;
+    count?: number | null;
+  } | null;
+  parent_id?: string | null;
+  is_recurrence_master?: boolean;
+  occurrence_index?: number | null;
   ticket_link?: string;
   cover_photo?: string | null;
   featured?: boolean;
@@ -130,10 +140,15 @@ export const api = {
     }).then((r) => handle<TagItem>(r)),
 
   // Entries
-  listEntries: (type?: EntryType) =>
-    fetch(`${API}/entries${type ? `?type=${type}` : ""}`).then((r) =>
+  listEntries: (type?: EntryType, danceStyle?: string) => {
+    const qs = new URLSearchParams();
+    if (type) qs.set("type", type);
+    if (danceStyle && danceStyle !== "all") qs.set("dance_style", danceStyle);
+    const q = qs.toString();
+    return fetch(`${API}/entries${q ? `?${q}` : ""}`).then((r) =>
       handle<EntryItem[]>(r)
-    ),
+    );
+  },
   listFeatured: () =>
     fetch(`${API}/entries?featured=true`).then((r) => handle<EntryItem[]>(r)),
   listCalendar: () =>
@@ -245,15 +260,15 @@ export const api = {
       credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
-  updateEntry: (token: string, id: string, body: Partial<EntryItem>) =>
-    fetch(`${API}/entries/${id}`, {
+  updateEntry: (token: string, id: string, body: Partial<EntryItem>, scope: "this" | "future" | "all" = "this") =>
+    fetch(`${API}/entries/${id}?scope=${scope}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
       credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
-  deleteEntry: (token: string, id: string) =>
-    fetch(`${API}/entries/${id}`, {
+  deleteEntry: (token: string, id: string, scope: "this" | "future" | "all" = "this") =>
+    fetch(`${API}/entries/${id}?scope=${scope}`, {
       method: "DELETE",
       headers: authHeaders(token),
       credentials: "include",

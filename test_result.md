@@ -306,7 +306,74 @@ backend:
 agent_communication:
     - agent: "main"
       message: |
-        Please test the new Google Calendar pipeline:
+        BLOC 5 (Style de danse) + BLOC 1 (Récurrence) — validation backend.
+
+        USE Bearer token `test_session_pcs_admin_000` (seeded admin).
+
+        BLOC 5 — DANCE_STYLE
+        - `GET /api/entries?dance_style=multi_styles` → 200, all entries in
+          response have dance_style=="multi_styles".
+        - `GET /api/entries?dance_style=foobar` → 400.
+        - `POST /api/entries` with body
+          {type:"soiree", title:"ON2 test", date:"2027-06-01", dance_style:"on2"}
+          → 200, response.dance_style=="on2".
+        - `POST /api/entries` with dance_style:"reggaeton" → 400 French msg.
+        - `POST /api/entries` without dance_style → 200, defaults to "multi_styles".
+        - `PUT /api/entries/{id}` with dance_style:"salsa_cubaine" → 200, persisted.
+        - Migration sanity: `GET /api/entries` (no filter) returns >0 entries, all
+          have a non-null dance_style field.
+        - Cleanup created entries.
+
+        BLOC 1 — RECURRENCE (RRULE)
+        - Create a weekly master:
+          `POST /api/entries` body:
+            {type:"soiree", title:"Weekly Test", date:"2027-05-03",
+             dance_style:"salsa_cubaine",
+             recurrence:{freq:"weekly", interval:1, count:4}}
+          → response has is_recurrence_master=true, id=MASTER_ID.
+          Backend should auto-create 3 child occurrences (4 total incl. master).
+        - `GET /api/entries?type=soiree&include_past=true` should find 4 entries
+          with title=="Weekly Test": 1 master (parent_id=None) + 3 children
+          (parent_id==MASTER_ID, occurrence_index 1..3). Dates should be
+          2027-05-03, 2027-05-10, 2027-05-17, 2027-05-24.
+
+        - Monthly same weekday:
+          Date=2027-02-05 (Friday = 1st Friday of Feb).
+          `POST /api/entries` {..., recurrence:{freq:"monthly_weekday", interval:1, count:3}}
+          → creates occurrences on 2027-03-05 (1st Fri), 2027-04-02 (1st Fri).
+          Verify dates are correct.
+
+        - Scope=this update:
+          `PUT /api/entries/{child_2_id}?scope=this` body changes title to "Changed"
+          → only child 2 updates, other siblings keep original title.
+
+        - Scope=future update:
+          `PUT /api/entries/{child_2_id}?scope=future` body title:"UPDATED"
+          → child 2 and child 3 get new title, child 1 + master unchanged.
+
+        - Scope=all update:
+          `PUT /api/entries/{child_1_id}?scope=all` body title:"ALL UPDATE"
+          → master + all 3 children get the new title.
+
+        - Scope=all DELETE:
+          `DELETE /api/entries/{MASTER_ID}?scope=all` → deletes 4 docs.
+
+        - `POST /api/entries/{master_id}/regenerate-occurrences` on a non-master
+          entry → 400.
+
+        - Idempotency: creating a duplicate weekly master then calling
+          regenerate-occurrences a 2nd time should NOT duplicate children.
+
+        - CRITICAL regression: `GET /api/entries` (public, no auth) should still
+          filter out past events and STILL return occurrences as individual entries
+          (not the master). I.e. the public sees children dates, not just the master.
+
+        - Past occurrences filter: create a weekly recurrence with date in the
+          past (e.g. 2024-01-01, count=6). Some occurrences would be past and
+          some future. `GET /api/entries?type=soiree` (no admin, no include_past)
+          should only return future ones.
+
+        Please clean up all test data created. Report all results.
         1) GET /api/entries?status=pending should include source='gcal' entries.
         2) POST /api/calendar/sync (admin) returns {ok, created, updated, unchanged, skipped}.
         3) POST /api/entries/{id}/approve?type=soiree on a gcal-pending entry
@@ -1106,3 +1173,171 @@ agent_communication:
           2. Ensure RN-web renders testID on a single outer element to avoid
              Playwright strict-mode duplicates in E2E.
 
+
+
+bloc_5_dance_style_and_bloc_1_recurrence:
+  - task: "BLOC 5 — dance_style filter / validation / default / persistence"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 14 BLOC 5 assertions PASS (0 failures).
+            Test script: /app/backend_test.py against
+            https://rhythm-frames-3.preview.emergentagent.com/api with admin
+            Bearer token test_session_pcs_admin_000.
+            - GET /api/entries?dance_style=multi_styles -> 200; every entry in
+              the response has dance_style=='multi_styles'. ✔
+            - GET /api/entries?dance_style=foobar -> 400. ✔
+            - POST /api/entries {dance_style:"on2"} -> 200, response has
+              dance_style=='on2'. ✔
+            - POST /api/entries {dance_style:"reggaeton"} -> 400, French
+              detail "dance_style invalide. Doit être l'un de: ...". ✔
+            - POST /api/entries without dance_style -> 200, persisted as
+              "multi_styles" (default). ✔
+            - PUT /api/entries/{id} {dance_style:"salsa_cubaine"} -> 200,
+              persisted (re-fetch confirms). ✔
+            - PUT /api/entries/{id} {dance_style:"kizomba"} -> 400. ✔
+            - Migration sanity: GET /api/entries returns >0 entries and every
+              one has a non-null dance_style field (no nulls). ✔
+
+  - task: "BLOC 1 — Recurrence (RRULE) — weekly + monthly_weekday + scope this/future/all + delete + regenerate idempotency + public visibility"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            All 42 BLOC 1 assertions PASS (0 failures).
+            Test script: /app/backend_test.py.
+
+            ### A. Weekly master with count=4 — 8/8 PASS
+              - POST /api/entries with recurrence{freq:"weekly",interval:1,count:4}
+                date=2027-05-03 -> 200; response is_recurrence_master=true,
+                parent_id=None.
+              - 4 total entries with that title (1 master + 3 children) created.
+              - All 3 children have parent_id==master_id and occurrence_index
+                values [1, 2, 3].
+              - Dates exactly: 2027-05-03 (master), 2027-05-10, 2027-05-17,
+                2027-05-24 (children).
+
+            ### B. monthly_weekday — 2/2 PASS
+              - POST with date=2027-02-05 (1st Friday of Feb) and
+                recurrence{freq:"monthly_weekday",interval:1,count:3}.
+              - Resulting dates exactly: 2027-02-05, 2027-03-05 (1st Fri Mar),
+                2027-04-02 (1st Fri Apr).
+
+            ### C. scope=this update — 3/3 PASS
+              - PUT child2 with scope=this and title="Changed" -> 200; only
+                child2 title becomes "Changed". Master and other 2 siblings
+                retain original title "Weekly Test BLOC1".
+
+            ### D. scope=future update — 5/5 PASS
+              - PUT child2 (date 2027-05-17) with scope=future and
+                title="UPDATED" -> 200. Result: child2 + child3 (dates >=
+                child2.date) updated to "UPDATED"; master + child1 unchanged.
+
+            ### E. scope=all update — 2/2 PASS
+              - PUT child1 with scope=all and title="ALL UPDATE" -> 200;
+                master + all 3 children all have title "ALL UPDATE".
+
+            ### F. DELETE scope=all — 6/6 PASS
+              - DELETE master with scope=all -> 200, response {ok:true,
+                deleted:4}. All 4 ids subsequently 404.
+
+            ### G. regenerate-occurrences on non-master -> 400 — 1/1 PASS
+              - POST /api/entries/{non_master_id}/regenerate-occurrences as
+                admin -> 400 with detail "Cette entrée n'est pas un maître
+                de récurrence".
+
+            ### H. Idempotency — 6/6 PASS
+              - Created weekly master with count=4 -> 4 entries total.
+              - 1st POST /entries/{master}/regenerate-occurrences -> 200
+                {created:0}.
+              - 2nd POST /entries/{master}/regenerate-occurrences -> 200
+                {created:0}. Total entries still 4 (no duplicates).
+
+            ### I. Public GET returns occurrence children individually — 4/4 PASS
+              - Created weekly master with count=3 (1 master + 2 children).
+              - Public GET /api/entries?type=soiree (no auth) returns the
+                3 individual occurrences with their own dates
+                (2027-09-06, 2027-09-13, 2027-09-20). Both children
+                (parent_id==master_id) are present in the public list, not
+                just the master.
+
+            ### J. Public past-event filter — 5/5 PASS
+              - Created a weekly master 4 weeks in the past with count=6 →
+                6 docs total (4 past, 2 future).
+              - Public GET /api/entries?type=soiree returns 0 past
+                occurrences (date < today filtered out) and exactly the
+                future ones (matches admin future_count). No past leak.
+
+            ### Cleanup
+              All test entries deleted via DELETE scope=all (verified 404).
+              Test run leaves the database in its original state.
+              Note re include_past param: backend's /entries?include_past=true
+              returns ONLY strictly past events (History tab semantics), not
+              "all events including past". The helper in backend_test.py
+              merges public future + admin past calls accordingly. This is
+              intentional behaviour, not a bug.
+
+agent_communication:
+    - agent: "testing"
+      message: |
+        ## BLOC 5 (dance_style) + BLOC 1 (Recurrence/RRULE) — ALL 56 ASSERTIONS PASS
+
+        Test script: /app/backend_test.py against
+        https://rhythm-frames-3.preview.emergentagent.com/api with admin
+        Bearer token test_session_pcs_admin_000.
+
+        ### BLOC 5 — dance_style (14/14 PASS)
+          - Filter ?dance_style=multi_styles -> 200, all returned items
+            have dance_style=='multi_styles'.
+          - Filter ?dance_style=foobar -> 400.
+          - POST with valid styles (on2, salsa_cubaine, multi_styles, autre)
+            -> 200; persisted exactly.
+          - POST with invalid styles (reggaeton, kizomba) -> 400 with French
+            detail "dance_style invalide. Doit être l'un de: ...".
+          - POST without dance_style -> 200, defaults to "multi_styles".
+          - PUT updates dance_style correctly; PUT with invalid -> 400.
+          - Migration sanity: every existing entry in the DB has a non-null
+            dance_style field (no nulls left over from migration).
+
+        ### BLOC 1 — Recurrence (42/42 PASS)
+          - Weekly master (date=2027-05-03, count=4) creates 1 master
+            (is_recurrence_master=true) + 3 children at 2027-05-10/17/24
+            with parent_id==master_id and occurrence_index 1..3.
+          - monthly_weekday (date=2027-02-05, count=3) creates "1st Friday
+            of month" occurrences: 2027-02-05, 2027-03-05, 2027-04-02.
+          - PUT scope=this updates only that occurrence; siblings unchanged.
+          - PUT scope=future updates the target + all later siblings; master
+            + earlier children unchanged.
+          - PUT scope=all updates master + every sibling.
+          - DELETE scope=all removes master + all children (deleted:4),
+            all ids subsequently 404.
+          - POST /api/entries/{non_master}/regenerate-occurrences -> 400.
+          - Idempotency: regenerate-occurrences called twice on a master
+            with full set returns created:0 both times; total entry count
+            unchanged.
+          - Public GET /api/entries returns occurrences as individual
+            entries (not just master), correctly filters out past
+            occurrences when no admin/include_past flag is set.
+
+        ### Notes
+          - Backend's /api/entries?include_past=true returns ONLY strictly
+            past events (History tab semantics). To list both past and
+            future for admin, the test harness queries public future +
+            admin past and merges. This is by design.
+          - All test data was cleaned up after the run; verified via
+            subsequent 404s on deleted ids.
+
+        No blockers. Backend BLOC 5 + BLOC 1 are fully working.

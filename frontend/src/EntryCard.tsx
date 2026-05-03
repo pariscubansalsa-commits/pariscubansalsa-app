@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, FONTS } from "./theme";
 import { EntryItem } from "./api";
+import { DanceStyleBadge } from "./DanceStyle";
 
 const MONTHS_FR = [
   "janv.", "févr.", "mars", "avril", "mai", "juin",
@@ -112,6 +113,12 @@ export default function EntryCard({
           <Text style={styles.title} numberOfLines={2}>
             {entry.title}
           </Text>
+
+          {!!entry.dance_style && (
+            <View style={{ marginTop: 8 }}>
+              <DanceStyleBadge style={entry.dance_style} size="sm" />
+            </View>
+          )}
 
           {!!entry.venue && (
             <View style={styles.metaRow}>

@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import RoleGuard from "../../../src/RoleGuard";
 import { useAuth } from "../../../src/auth";
 import { api, EntryItem } from "../../../src/api";
+import { DanceStyleChips, DanceStyle } from "../../../src/DanceStyle";
 import { COLORS, FONTS, SPACING } from "../../../src/theme";
 
 const TYPES = [
@@ -44,6 +45,7 @@ function Inner() {
   const [description, setDescription] = React.useState("");
   const [level, setLevel] = React.useState("");
   const [category, setCategory] = React.useState("");
+  const [danceStyle, setDanceStyle] = React.useState<DanceStyle>("multi_styles");
   const [price, setPrice] = React.useState("");
   const [ticketLink, setTicketLink] = React.useState("");
 
@@ -77,6 +79,7 @@ function Inner() {
         setDescription(e.description || "");
         setLevel(e.level || "");
         setCategory(e.category || "");
+        setDanceStyle((e.dance_style as DanceStyle) || "multi_styles");
         setPrice(e.price || "");
         setTicketLink(e.ticket_link || "");
       } catch (e: any) {
@@ -111,6 +114,7 @@ function Inner() {
       description,
       level,
       category,
+      dance_style: danceStyle,
       price,
       ticket_link: ticketLink,
     };
@@ -219,6 +223,14 @@ function Inner() {
                 <Text style={[styles.chipTxt, category === c && styles.chipTxtActive]}>{c}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+          <View style={{ marginTop: 22 }}>
+            <DanceStyleChips
+              value={danceStyle}
+              onChange={setDanceStyle}
+              required
+              testIDPrefix="org-style"
+            />
           </View>
           <Field label="PRIX" testID="input-price" value={price} onChangeText={setPrice} placeholder="15€ — Gratuit" />
           <Field label="LIEN BILLETTERIE" testID="input-ticket" value={ticketLink} onChangeText={setTicketLink} placeholder="https://…" />

@@ -16,6 +16,7 @@ import TopBar from "./TopBar";
 import FeaturedCarousel from "./FeaturedCarousel";
 import { COLORS, FONTS, SPACING } from "./theme";
 import AuthCallback from "./AuthCallback";
+import { DanceStyleFilterChips, DanceStyle } from "./DanceStyle";
 
 type Props = {
   type?: EntryType;
@@ -26,6 +27,8 @@ type Props = {
   useCalendar?: boolean;
   handleAuthCallback?: boolean;
   headerExtra?: React.ReactNode;
+  /** Show the dance-style filter row (TOUS / SALSA CUBAINE / ON2 / MULTI / AUTRE) */
+  showDanceStyleFilter?: boolean;
 };
 
 export default function EntriesScreen({
@@ -37,11 +40,13 @@ export default function EntriesScreen({
   useCalendar = false,
   handleAuthCallback = false,
   headerExtra,
+  showDanceStyleFilter = false,
 }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<EntryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [danceStyle, setDanceStyle] = useState<DanceStyle | "all">("all");
 
   const isAuthCallback =
     handleAuthCallback &&
@@ -53,15 +58,20 @@ export default function EntriesScreen({
     try {
       const data = useCalendar
         ? await api.listCalendar()
-        : await api.listEntries(type);
-      setItems(data);
+        : await api.listEntries(type, danceStyle);
+      // Calendar endpoint doesn't filter by dance_style server-side; do it client-side
+      const filtered =
+        useCalendar && danceStyle !== "all"
+          ? data.filter((d) => d.dance_style === danceStyle)
+          : data;
+      setItems(filtered);
     } catch (e) {
       console.log("entries err", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [type, useCalendar]);
+  }, [type, useCalendar, danceStyle]);
 
   useEffect(() => {
     if (!isAuthCallback) load();
@@ -95,6 +105,15 @@ export default function EntriesScreen({
                 </Text>
               </View>
               {headerExtra ? <View style={{ marginTop: 18 }}>{headerExtra}</View> : null}
+              {showDanceStyleFilter && (
+                <View style={{ marginTop: 18 }}>
+                  <DanceStyleFilterChips
+                    value={danceStyle}
+                    onChange={setDanceStyle}
+                    testIDPrefix={`filter-${type || "agenda"}`}
+                  />
+                </View>
+              )}
             </View>
           </>
         }

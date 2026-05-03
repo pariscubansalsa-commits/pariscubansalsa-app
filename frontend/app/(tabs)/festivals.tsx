@@ -23,6 +23,7 @@ export default function Festivals() {
         </>
       }
       subtitle="Calendrier des festivals de salsa cubaine en France et en Europe. Réservez vos vacances dansantes."
+      showDanceStyleFilter
     />
   );
 }
