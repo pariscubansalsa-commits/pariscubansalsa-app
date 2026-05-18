@@ -18,7 +18,7 @@ import { api, TeacherItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { DanceStyleChips, DanceStyle } from "./DanceStyle";
 
-export type EntryTypeSubmit = "soiree" | "workshop" | "festival" | "agenda";
+export type EntryTypeSubmit = "soiree" | "workshop" | "festival" | "agenda" | "mensuelle";
 
 const EMPTY = {
   title: "",
@@ -35,6 +35,7 @@ const EMPTY = {
   price: "",
   category: "",
   ticket_link: "",
+  instagram_post: "",
   cover_photo: "" as string,
   submitter_name: "",
   submitter_email: "",
@@ -43,6 +44,7 @@ const EMPTY = {
 
 const TYPE_OPTIONS: { v: EntryTypeSubmit; l: string }[] = [
   { v: "soiree", l: "Soirée / concert" },
+  { v: "mensuelle", l: "Mensuelle" },
   { v: "workshop", l: "Workshop" },
   { v: "festival", l: "Festival" },
   { v: "agenda", l: "Sortie / autre" },
@@ -144,6 +146,7 @@ export default function SubmitEntryButton({
     workshop: "PROPOSER UN WORKSHOP",
     festival: "PROPOSER UN FESTIVAL",
     agenda: "PROPOSER UN EVENT",
+    mensuelle: "PROPOSER UNE MENSUELLE",
   };
   const label = customLabel || defaultLabel[type];
 
@@ -152,6 +155,7 @@ export default function SubmitEntryButton({
     workshop: "un workshop",
     festival: "un festival",
     agenda: "un event",
+    mensuelle: "une mensuelle",
   };
 
   return (
@@ -371,6 +375,17 @@ export default function SubmitEntryButton({
                     autoCapitalize="none"
                     placeholder="https://www.helloasso.com/..."
                   />
+
+                  {currentType === "mensuelle" && (
+                    <Field
+                      label="LIEN POST INSTAGRAM (optionnel)"
+                      testID="sub-instagram-post"
+                      value={form.instagram_post}
+                      onChange={(v) => setForm({ ...form, instagram_post: v })}
+                      autoCapitalize="none"
+                      placeholder="https://www.instagram.com/p/XXXXXXX/"
+                    />
+                  )}
 
                   <Text style={[styles.label, { marginTop: 14 }]}>IMAGE / AFFICHE</Text>
                   {form.cover_photo ? (

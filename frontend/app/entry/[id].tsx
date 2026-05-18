@@ -24,6 +24,7 @@ import { formatDateFR, formatDateRangeFR } from "../../src/EntryCard";
 import { useShareMenu } from "../../src/ShareMenu";
 import { track } from "../../src/analytics";
 import { confirmAction, notify } from "../../src/dialog";
+import InstagramEmbed from "../../src/InstagramEmbed";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -53,6 +54,7 @@ const EMPTY_FORM = {
   category: "",
   price: "",
   ticket_link: "",
+  instagram_post: "",
   cover_photo: null as string | null,
   featured: false,
 };
@@ -141,6 +143,7 @@ export default function EntryDetail() {
       category: (entry as any).category || "",
       price: (entry as any).price || "",
       ticket_link: entry.ticket_link || "",
+      instagram_post: (entry as any).instagram_post || "",
       cover_photo: entry.cover_photo || null,
       featured: !!entry.featured,
     });
@@ -346,6 +349,8 @@ export default function EntryDetail() {
           {!!entry.description && (
             <Text style={styles.desc}>{entry.description}</Text>
           )}
+
+          {!!entry.instagram_post && <InstagramEmbed url={entry.instagram_post} />}
 
           {!!entry.ticket_link && (
             <TouchableOpacity
@@ -562,6 +567,14 @@ export default function EntryDetail() {
                 placeholder="https://www.helloasso.com/..."
                 autoCapitalize="none"
                 testID="edit-ticket"
+              />
+              <Field
+                label="LIEN POST INSTAGRAM"
+                value={form.instagram_post}
+                onChange={(v) => setForm({ ...form, instagram_post: v })}
+                placeholder="https://www.instagram.com/p/XXXXX/"
+                autoCapitalize="none"
+                testID="edit-instagram-post"
               />
 
               <TouchableOpacity

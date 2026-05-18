@@ -511,8 +511,8 @@ agent_communication:
 
 metadata:
   created_by: "main_agent"
-  version: "1.1"
-  test_sequence: 1
+  version: "1.2"
+  test_sequence: 2
   run_ui: false
 
 test_plan:
@@ -520,6 +520,47 @@ test_plan:
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+mensuelle_instagram_2026_05_18:
+  - task: "Backend — Mensuelle type + instagram_post field"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ALL 10 ASSERTIONS PASS. Test script /app/backend_test_mensuelle.py
+            against https://rhythm-frames-3.preview.emergentagent.com/api with
+            admin Bearer test_session_pcs_admin_000.
+
+            1) GET /api/entries?type=mensuelle -> 200, [] (no leakage of
+               other types; VALID_TYPES now correctly accepts 'mensuelle').
+            2) POST /api/entries/submit (public, no auth) with the full
+               mensuelle payload -> 200 with status='pending',
+               type='mensuelle', and instagram_post echoed back exactly
+               (https://www.instagram.com/p/CmHpAaNL_q5/).
+            3) POST /api/entries (admin) with type=mensuelle, status='approved',
+               same instagram_post -> 200, type='mensuelle', status='approved',
+               instagram_post persisted.
+            4) GET /api/entries/{id} (created in 3) -> 200, instagram_post
+               present and matches.
+            5) PUT /api/entries/{id} (admin) with instagram_post set to
+               https://www.instagram.com/p/NEWCODE_X/ -> 200, new URL returned;
+               follow-up GET confirms it is persisted (exclude_unset patch from
+               2026-05-02 makes partial PUTs work correctly).
+            6) POST /api/entries/submit type=invalid_xyz -> 400
+               {"detail":"Type d'event invalide"}.
+            7) Regression: POST /api/entries/submit type=soiree minimal valid
+               body -> 200 status='pending', no regression on other types.
+            8) Cleanup: all 3 created entries DELETEd (scope=all) and each
+               subsequent GET returns 404. Database left clean.
+
+            No issues. Backend Mensuelle + instagram_post additions are fully
+            working.
 
 bloc_2_3_4_security_roles:
   - task: "BLOC 2 — require_role / require_admin (401 vs 403)"

@@ -106,6 +106,9 @@ export default function EntryCard({
           {entry.type === "soiree" && (
             <Text style={styles.overline}>SOIRÉE MENSUELLE</Text>
           )}
+          {entry.type === "mensuelle" && (
+            <Text style={styles.overline}>RENDEZ-VOUS MENSUEL</Text>
+          )}
           {isFestival && !!rangeLabel && (
             <Text style={styles.overline}>{rangeLabel.toUpperCase()}</Text>
           )}

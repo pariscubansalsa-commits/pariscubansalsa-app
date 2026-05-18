@@ -25,17 +25,28 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Accueil",
+          title: "Soirées",
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="home-outline" color={color} focused={focused} />
+            <TabIcon name="sparkles-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="mensuelles"
+        options={{
+          title: "Mensuelles",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="repeat-outline" color={color} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="workshops"
         options={{
-          href: null,
           title: "Workshops",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="school-outline" color={color} focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -47,23 +58,14 @@ export default function TabsLayout() {
           ),
         }}
       />
+      {/* Hidden routes — kept for direct navigation only */}
       <Tabs.Screen
         name="profs"
-        options={{
-          title: "Artistes",
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="people-outline" color={color} focused={focused} />
-          ),
-        }}
+        options={{ href: null, title: "Artistes" }}
       />
       <Tabs.Screen
         name="galerie"
-        options={{
-          title: "Galerie",
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="images-outline" color={color} focused={focused} />
-          ),
-        }}
+        options={{ href: null, title: "Galerie" }}
       />
     </Tabs>
   );

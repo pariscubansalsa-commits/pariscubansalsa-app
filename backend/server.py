@@ -137,6 +137,7 @@ class Entry(BaseModel):
     category: Optional[str] = ""  # legacy free-text style — kept for back-compat
     dance_style: str = DEFAULT_DANCE_STYLE  # 'salsa_cubaine' | 'on2' | 'multi_styles' | 'autre'
     ticket_link: Optional[str] = ""
+    instagram_post: Optional[str] = ""  # URL d'un post Instagram à intégrer (mensuelles, etc.)
     # Recurrence metadata ------------------------------------------------
     recurrence: Optional[Recurrence] = None
     parent_id: Optional[str] = None  # set on each generated occurrence
@@ -171,6 +172,7 @@ class EntryCreate(BaseModel):
     category: Optional[str] = ""
     dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
+    instagram_post: Optional[str] = ""
     cover_photo: Optional[str] = None
     featured: bool = False
     status: Optional[str] = None
@@ -194,6 +196,7 @@ class EntrySubmit(BaseModel):
     category: Optional[str] = ""
     dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
+    instagram_post: Optional[str] = ""
     cover_photo: Optional[str] = None
     submitter_name: str
     submitter_email: str

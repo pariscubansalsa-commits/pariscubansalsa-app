@@ -31,7 +31,7 @@ export type PhotoItem = {
   tags: TagItem[];
 };
 
-export type EntryType = "agenda" | "soiree" | "workshop" | "festival";
+export type EntryType = "agenda" | "soiree" | "workshop" | "festival" | "mensuelle";
 
 export type EntryItem = {
   id: string;
@@ -59,6 +59,7 @@ export type EntryItem = {
   is_recurrence_master?: boolean;
   occurrence_index?: number | null;
   ticket_link?: string;
+  instagram_post?: string;
   cover_photo?: string | null;
   featured?: boolean;
   status?: "pending" | "approved" | "featured" | "rejected";
@@ -173,10 +174,12 @@ export const api = {
     }).then((r) => handle<EntryItem>(r)),
 
   submitEntry: (body: {
-    type: "soiree" | "workshop";
+    type: "soiree" | "workshop" | "festival" | "agenda" | "mensuelle";
     title: string;
     date: string;
+    end_date?: string;
     time?: string;
+    end_time?: string;
     venue?: string;
     address?: string;
     description?: string;
@@ -185,10 +188,13 @@ export const api = {
     level?: string;
     price?: string;
     category?: string;
+    dance_style?: string;
     ticket_link?: string;
+    instagram_post?: string;
     cover_photo?: string | null;
     submitter_name: string;
     submitter_email: string;
+    submitter_link?: string;
   }) =>
     fetch(`${API}/entries/submit`, {
       method: "POST",
