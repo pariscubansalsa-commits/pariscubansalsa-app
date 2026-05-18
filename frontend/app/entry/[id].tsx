@@ -57,6 +57,7 @@ const EMPTY_FORM = {
   price: "",
   ticket_link: "",
   instagram_post: "",
+  is_mensuelle: false,
   cover_photo: null as string | null,
   featured: false,
 };
@@ -148,6 +149,7 @@ export default function EntryDetail() {
       price: (entry as any).price || "",
       ticket_link: entry.ticket_link || "",
       instagram_post: (entry as any).instagram_post || "",
+      is_mensuelle: !!(entry as any).is_mensuelle,
       cover_photo: entry.cover_photo || null,
       featured: !!entry.featured,
     });
@@ -644,6 +646,46 @@ export default function EntryDetail() {
                 <View style={[styles.switch, form.featured && styles.switchOn]}>
                   <View
                     style={[styles.switchDot, form.featured && styles.switchDotOn]}
+                  />
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="edit-is-mensuelle-toggle"
+                style={[
+                  styles.featuredRow,
+                  form.is_mensuelle && styles.featuredRowOn,
+                ]}
+                onPress={() =>
+                  setForm({ ...form, is_mensuelle: !form.is_mensuelle })
+                }
+              >
+                <View style={styles.featuredLeft}>
+                  <Ionicons
+                    name={form.is_mensuelle ? "repeat" : "repeat-outline"}
+                    size={18}
+                    color={
+                      form.is_mensuelle
+                        ? COLORS.primaryText
+                        : COLORS.secondaryText
+                    }
+                  />
+                  <View>
+                    <Text style={styles.featuredTitle}>Mensuelle récurrente</Text>
+                    <Text style={styles.featuredSub}>
+                      Fait apparaître cet event dans la rubrique MENSUELLES en
+                      plus de sa rubrique principale.
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={[styles.switch, form.is_mensuelle && styles.switchOn]}
+                >
+                  <View
+                    style={[
+                      styles.switchDot,
+                      form.is_mensuelle && styles.switchDotOn,
+                    ]}
                   />
                 </View>
               </TouchableOpacity>

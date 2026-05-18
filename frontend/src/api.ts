@@ -60,6 +60,7 @@ export type EntryItem = {
   occurrence_index?: number | null;
   ticket_link?: string;
   instagram_post?: string;
+  is_mensuelle?: boolean;
   cover_photo?: string | null;
   featured?: boolean;
   status?: "pending" | "approved" | "featured" | "rejected";
@@ -289,6 +290,37 @@ export const api = {
       headers: authHeaders(token),
       credentials: "include",
     }).then((r) => handle<any>(r)),
+
+  /**
+   * Duplicate a recurring (mensuelle) entry, advancing the date by 1 month.
+   * - Admin → new entry is `approved`; full override fields allowed.
+   * - Organisateur owner → new entry is `pending`; only `date`/`end_date` honored.
+   */
+  duplicateNextEntry: (
+    token: string,
+    id: string,
+    overrides: Partial<{
+      date: string;
+      end_date: string;
+      title: string;
+      time: string;
+      end_time: string;
+      venue: string;
+      address: string;
+      description: string;
+      ticket_link: string;
+      instagram_post: string;
+      price: string;
+      dance_style: string;
+      category: string;
+    }> = {},
+  ) =>
+    fetch(`${API}/entries/${id}/duplicate-next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify(overrides),
+    }).then((r) => handle<EntryItem>(r)),
 
   // Teachers
   listTeachers: () =>

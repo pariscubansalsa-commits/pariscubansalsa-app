@@ -138,6 +138,7 @@ class Entry(BaseModel):
     dance_style: str = DEFAULT_DANCE_STYLE  # 'salsa_cubaine' | 'on2' | 'multi_styles' | 'autre'
     ticket_link: Optional[str] = ""
     instagram_post: Optional[str] = ""  # URL d'un post Instagram à intégrer (mensuelles, etc.)
+    is_mensuelle: bool = False  # Si vrai, l'event apparaît aussi dans la rubrique MENSUELLES
     # Recurrence metadata ------------------------------------------------
     recurrence: Optional[Recurrence] = None
     parent_id: Optional[str] = None  # set on each generated occurrence
@@ -173,6 +174,7 @@ class EntryCreate(BaseModel):
     dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     instagram_post: Optional[str] = ""
+    is_mensuelle: bool = False
     cover_photo: Optional[str] = None
     featured: bool = False
     status: Optional[str] = None
@@ -197,6 +199,7 @@ class EntrySubmit(BaseModel):
     dance_style: Optional[str] = None
     ticket_link: Optional[str] = ""
     instagram_post: Optional[str] = ""
+    is_mensuelle: bool = False
     cover_photo: Optional[str] = None
     submitter_name: str
     submitter_email: str
@@ -699,10 +702,17 @@ async def list_entries(
     filter for the History tab.
     """
     query: dict = {}
+    extra_and: List[dict] = []  # use $and to safely combine multiple $or clauses
     if type:
         if type not in VALID_TYPES:
             raise HTTPException(status_code=400, detail="Invalid type")
-        query["type"] = type
+        if type == "mensuelle":
+            # MENSUELLES = entries explicitly typed 'mensuelle' OR any entry
+            # flagged is_mensuelle=true (so admins can promote a soirée/workshop
+            # into the monthly rendez-vous list without changing its main type).
+            extra_and.append({"$or": [{"type": "mensuelle"}, {"is_mensuelle": True}]})
+        else:
+            query["type"] = type
     if featured is not None:
         # Legacy: also map to status='featured'
         if featured:
@@ -739,10 +749,10 @@ async def list_entries(
     today_str = today_paris_str()
     if include_past and user_admin:
         # Admin History tab: show STRICTLY past events
-        query["$and"] = [
-            {"date": {"$lt": today_str}},
-            {"$or": [{"end_date": {"$in": [None, ""]}}, {"end_date": {"$lt": today_str}}]},
-        ]
+        extra_and.append({"date": {"$lt": today_str}})
+        extra_and.append(
+            {"$or": [{"end_date": {"$in": [None, ""]}}, {"end_date": {"$lt": today_str}}]}
+        )
     elif user_admin and status:
         # Admin queries with an explicit status (pending / rejected / etc)
         # do NOT filter by date — drafts can have empty dates and we must
@@ -750,10 +760,17 @@ async def list_entries(
         pass
     else:
         # Public listing: only today/upcoming events
-        query["$or"] = [
-            {"date": {"$gte": today_str}},
-            {"end_date": {"$gte": today_str}},
-        ]
+        extra_and.append(
+            {"$or": [{"date": {"$gte": today_str}}, {"end_date": {"$gte": today_str}}]}
+        )
+
+    if extra_and:
+        # Compose multiple $or-clauses safely using $and
+        if len(extra_and) == 1 and "$or" in extra_and[0] and "$and" not in query:
+            # Common path: a single $or clause — set it directly
+            query["$or"] = extra_and[0]["$or"]
+        else:
+            query["$and"] = extra_and
 
     items = await db.entries.find(query, {"_id": 0}).to_list(2000)
 
@@ -2178,6 +2195,112 @@ async def list_past_festivals_with_gallery():
         {"_id": 0},
     ).sort("date", -1)
     return [Entry(**e) async for e in cursor]
+
+
+# ========= Duplicate-Next (TÂCHE 2 COMPLÉMENT — Programmer le prochain) =========
+
+
+class DuplicateNextInput(BaseModel):
+    """Optional overrides for the duplicated entry. Date defaults to +1 month."""
+    date: Optional[str] = None
+    end_date: Optional[str] = None
+    # Admin-only override fields (silently ignored for organisateurs):
+    title: Optional[str] = None
+    time: Optional[str] = None
+    end_time: Optional[str] = None
+    venue: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    ticket_link: Optional[str] = None
+    instagram_post: Optional[str] = None
+    price: Optional[str] = None
+    dance_style: Optional[str] = None
+    category: Optional[str] = None
+
+
+def _add_one_month_iso(d_iso: str) -> str:
+    """Return YYYY-MM-DD one month after `d_iso` (clamps to last day if needed)."""
+    import calendar
+    from datetime import date as _date
+
+    d = _date.fromisoformat(d_iso)
+    y, m = d.year, d.month + 1
+    if m > 12:
+        m -= 12
+        y += 1
+    last = calendar.monthrange(y, m)[1]
+    return _date(y, m, min(d.day, last)).isoformat()
+
+
+@api_router.post("/entries/{entry_id}/duplicate-next", response_model=Entry)
+async def duplicate_next(
+    entry_id: str,
+    payload: DuplicateNextInput,
+    request: Request,
+):
+    """Duplicate a recurring (mensuelle) entry, advancing the date by 1 month.
+
+    - Admin: status='approved', all override fields applied.
+    - Organisateur owner: status='pending', only `date` (and `end_date`) honored.
+    - Anyone else: 403.
+    """
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    entry = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    # Only allow duplicate-next on recurring monthly entries
+    is_recurring = entry.get("type") == "mensuelle" or bool(entry.get("is_mensuelle"))
+    if not is_recurring:
+        raise HTTPException(
+            status_code=400,
+            detail="Entry is not a recurring mensuelle (set is_mensuelle=true to enable).",
+        )
+
+    is_admin = bool(user.is_admin)
+    is_owner = entry.get("submitted_by") == user.user_id
+    if not is_admin and not is_owner:
+        raise HTTPException(status_code=403, detail="Not the owner of this entry")
+
+    # Compute next date(s)
+    try:
+        next_date = payload.date or _add_one_month_iso(entry["date"])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid current date on entry")
+    next_end = payload.end_date
+    if next_end is None and entry.get("end_date"):
+        try:
+            next_end = _add_one_month_iso(entry["end_date"])
+        except ValueError:
+            next_end = entry["end_date"]
+
+    new_doc = {**entry}
+    new_doc["id"] = str(uuid.uuid4())
+    new_doc["date"] = next_date
+    new_doc["end_date"] = next_end or ""
+    new_doc["status"] = "approved" if is_admin else "pending"
+    new_doc["created_at"] = datetime.now(timezone.utc)
+    new_doc["submitted_by"] = user.user_id
+    new_doc["submitter_name"] = entry.get("submitter_name") or user.name or ""
+    new_doc["submitter_email"] = user.email or entry.get("submitter_email") or ""
+    # Don't carry over "featured" flag (it's edition-specific)
+    new_doc["featured"] = False
+
+    # Admin can override more fields
+    if is_admin:
+        for fname in (
+            "title", "time", "end_time", "venue", "address", "description",
+            "ticket_link", "instagram_post", "price", "dance_style", "category",
+        ):
+            v = getattr(payload, fname, None)
+            if v is not None:
+                new_doc[fname] = v
+
+    await db.entries.insert_one(new_doc)
+    return Entry(**new_doc)
 
 
 # Re-include router so the analytics endpoints above are mounted
