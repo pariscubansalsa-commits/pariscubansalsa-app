@@ -6,22 +6,13 @@ import {
   TouchableOpacity,
   Platform,
   Image,
-  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "./auth";
 import { COLORS, FONTS, SPACING } from "./theme";
-
-async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
-}
+import { openExternal } from "./links";
 
 export default function TopBar() {
   const router = useRouter();
@@ -68,7 +59,7 @@ export default function TopBar() {
           )}
           <TouchableOpacity
             testID="instagram-link"
-            onPress={() => openLink("https://instagram.com/pariscubansalsa")}
+            onPress={() => openExternal("https://www.instagram.com/pariscubansalsa/")}
             style={styles.instaBtn}
           >
             <Ionicons name="logo-instagram" size={14} color={COLORS.accentYellow} />

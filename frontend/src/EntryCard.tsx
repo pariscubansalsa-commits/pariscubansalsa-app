@@ -5,8 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  Linking,
-  Platform,
   Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +12,7 @@ import { useRouter } from "expo-router";
 import { COLORS, FONTS } from "./theme";
 import { EntryItem } from "./api";
 import { DanceStyleBadge } from "./DanceStyle";
+import { openExternal } from "./links";
 
 const MONTHS_FR = [
   "janv.", "févr.", "mars", "avril", "mai", "juin",
@@ -51,12 +50,7 @@ export function formatDateRangeFR(start: string, end?: string | null): string {
 }
 
 async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
+  openExternal(url);
 }
 
 export default function EntryCard({

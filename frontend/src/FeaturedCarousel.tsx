@@ -8,26 +8,19 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
-  Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, EntryItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { formatDateFR } from "./EntryCard";
+import { openExternal } from "./links";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const CARD_W = Math.min(SCREEN_W * 0.78, 300);
 const CARD_H = CARD_W * 1.25;
 
-async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
-}
+const openLink = (url: string) => openExternal(url);
 
 export default function FeaturedCarousel() {
   const router = useRouter();

@@ -1,7 +1,8 @@
 import React from "react";
-import { View, Text, StyleSheet, Platform, TouchableOpacity, Linking } from "react-native";
+import { View, Text, StyleSheet, Platform, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, FONTS } from "./theme";
+import { openExternal } from "./links";
 
 /**
  * Parse an Instagram post URL and return the shortcode (e.g. CmHpAaNL_q5).
@@ -16,13 +17,7 @@ function parseInstagramShortcode(url: string): string | null {
   return m ? m[1] : null;
 }
 
-async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  if (await Linking.canOpenURL(url)) Linking.openURL(url);
-}
+const openLink = (url: string) => openExternal(url);
 
 export default function InstagramEmbed({ url }: { url: string }) {
   const code = parseInstagramShortcode(url);

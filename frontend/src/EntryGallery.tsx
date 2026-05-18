@@ -8,13 +8,13 @@ import {
   Modal,
   Dimensions,
   Platform,
-  Linking,
   ActivityIndicator,
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, EntryMediaItem } from "./api";
 import { COLORS, FONTS } from "./theme";
+import { openExternal } from "./links";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const COLS = SCREEN_W >= 700 ? 4 : 3;
@@ -42,11 +42,7 @@ function thumbnailFor(item: EntryMediaItem): string | null {
 }
 
 async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  if (await Linking.canOpenURL(url)) Linking.openURL(url);
+  openExternal(url);
 }
 
 /** Download a base64 photo on web by triggering an anchor click. */

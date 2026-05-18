@@ -27,15 +27,9 @@ import { confirmAction, notify } from "../../src/dialog";
 import InstagramEmbed from "../../src/InstagramEmbed";
 import EntryGallery from "../../src/EntryGallery";
 import AdminGalleryManager from "../../src/AdminGalleryManager";
+import { openExternal } from "../../src/links";
 
-async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
-}
+const openLink = (url: string) => openExternal(url);
 
 function buildMapsUrl(venue?: string, address?: string): string {
   const q = [venue, address].filter(Boolean).join(", ");

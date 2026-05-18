@@ -6,11 +6,11 @@ import {
   Modal,
   TouchableOpacity,
   Platform,
-  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { COLORS, FONTS, SPACING } from "./theme";
+import { openExternal } from "./links";
 
 export type ShareTarget = {
   /** URL to share */
@@ -20,15 +20,6 @@ export type ShareTarget = {
   /** Optional longer text used in WhatsApp/Twitter */
   text?: string;
 };
-
-async function openExternal(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
-}
 
 /**
  * Try the native share sheet first (mobile + supported browsers).

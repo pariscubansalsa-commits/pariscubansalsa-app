@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Platform,
-  Linking,
   RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,15 +18,9 @@ import EntryCard from "../../src/EntryCard";
 import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { track } from "../../src/analytics";
+import { openExternal, normalizeInstagramURL } from "../../src/links";
 
-async function openLink(url: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.open(url, "_blank");
-    return;
-  }
-  const can = await Linking.canOpenURL(url);
-  if (can) Linking.openURL(url);
-}
+const openLink = (url: string) => openExternal(url);
 
 export default function TeacherDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -143,7 +136,7 @@ export default function TeacherDetail() {
                 <TouchableOpacity
                   testID="ig-link"
                   style={styles.socialBtn}
-                  onPress={() => openLink(`https://instagram.com/${ig}`)}
+                  onPress={() => openExternal(normalizeInstagramURL(ig))}
                 >
                   <Ionicons name="logo-instagram" size={16} color={COLORS.primaryText} />
                   <Text style={styles.socialTxt}>@{ig}</Text>
