@@ -57,9 +57,11 @@ export default function Root({ children }: PropsWithChildren) {
         />
 
         {/* Favicons */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
         <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
         <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-        <link rel="shortcut icon" href="/icons/favicon-32.png" />
+        <link rel="shortcut icon" href="/favicon.ico" />
 
         {/* OpenGraph */}
         <meta property="og:type" content="website" />
