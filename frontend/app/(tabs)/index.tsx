@@ -26,6 +26,7 @@ export default function Index() {
       }
       subtitle="L'agenda vivant de la communauté Paris Cuban Salsa — soirées, workshops, festivals. Actualisé en permanence."
       handleAuthCallback
+      showDanceStyleFilter
       headerExtra={<SubmitEntryButton type="agenda" customLabel="+ PROPOSER UN EVENT" />}
     />
   );

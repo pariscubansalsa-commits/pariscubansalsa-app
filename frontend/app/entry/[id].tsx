@@ -12,7 +12,6 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -24,6 +23,7 @@ import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { formatDateFR, formatDateRangeFR } from "../../src/EntryCard";
 import { useShareMenu } from "../../src/ShareMenu";
 import { track } from "../../src/analytics";
+import { confirmAction, notify } from "../../src/dialog";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -166,8 +166,7 @@ export default function EntryDetail() {
   const handleSave = async () => {
     if (!token || !entry) return;
     if (!form.title.trim() || !form.date.trim()) {
-      if (Platform.OS === "web") window.alert("Titre et date requis");
-      else Alert.alert("Champs manquants", "Titre et date sont requis");
+      notify("Champs manquants", "Titre et date sont requis");
       return;
     }
     setSaving(true);
@@ -177,32 +176,29 @@ export default function EntryDetail() {
       setEditOpen(false);
       showToast("EVENT MIS À JOUR");
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
-      else Alert.alert("Erreur", e.message);
+      notify("Erreur", e.message);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!token || !entry) return;
-    const ok =
-      Platform.OS === "web"
-        ? window.confirm("Supprimer cet event ? Cette action est irréversible.")
-        : await new Promise<boolean>((r) =>
-            Alert.alert("Supprimer ?", "Action irréversible.", [
-              { text: "Annuler", onPress: () => r(false) },
-              { text: "Supprimer", style: "destructive", onPress: () => r(true) },
-            ])
-          );
-    if (!ok) return;
-    try {
-      await api.deleteEntry(token, entry.id);
-      showToast("EVENT SUPPRIMÉ");
-      setTimeout(() => router.back(), 600);
-    } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
-    }
+    confirmAction({
+      title: "Supprimer cet event ?",
+      message: "Cette action est irréversible.",
+      okLabel: "Supprimer",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteEntry(token, entry.id);
+          showToast("EVENT SUPPRIMÉ");
+          setTimeout(() => router.back(), 600);
+        } catch (e: any) {
+          notify("Erreur", e.message);
+        }
+      },
+    });
   };
 
   const handleDuplicate = async () => {
@@ -212,7 +208,7 @@ export default function EntryDetail() {
       showToast("COPIE CRÉÉE — DATE À DÉFINIR");
       setTimeout(() => router.replace(`/entry/${created.id}` as any), 700);
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
+      notify("Erreur", e.message);
     }
   };
 
@@ -226,7 +222,7 @@ export default function EntryDetail() {
       setEntry(updated);
       showToast(isFeatured ? "RETIRÉ DES COUPS DE CŒUR" : "AJOUTÉ AUX COUPS DE CŒUR");
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
+      notify("Erreur", e.message);
     }
   };
 
