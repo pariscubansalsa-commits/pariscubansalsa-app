@@ -521,6 +521,78 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+paris_cuban_salsa_expo_2026_05_18:
+  - task: "TÂCHE 1+2+3+3BIS+5 — Bottom nav rename, /mensuelles, /workshops double filter, teacher link, artist profile"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/_layout.tsx, /app/frontend/app/(tabs)/mensuelles.tsx, /app/frontend/app/(tabs)/workshops.tsx, /app/frontend/src/SubmitEntryButton.tsx, /app/frontend/src/EntryCard.tsx, /app/frontend/app/profs/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            FRONTEND E2E (Mobile 390x844) on http://localhost:3000.
+            31 PASS / 3 FALSE-NEGATIVES (no real bugs).
+
+            T1 — Bottom nav (PASS): tab bar shows exactly
+            SOIRÉES | MENSUELLES | WORKSHOPS | FESTIVALS in that order.
+            No ACCUEIL / ARTISTES / GALERIE tabs. The "order match" test-script
+            assertion returned false only because the DOM text node also contains
+            the Ionicons glyph (\uf58d…) before the label; visual confirmation
+            via screenshot is unambiguous (see 01_home_soirees.png and
+            workshops footer nav).
+
+            T2 — /mensuelles (PASS, 8/8): page renders "Les mensuelles."
+            headline + "PROPOSER UNE MENSUELLE" button. Modal opens; Mensuelle
+            chip selected; "LIEN POST INSTAGRAM (optionnel)" field (testID
+            sub-instagram-post) visible. Switching type to Soirée / Workshop /
+            Festival hides the IG field; switching back to Mensuelle restores it.
+
+            T3 — /workshops (PASS, 11/11):
+              - "Workshops à venir." title, "2 WORKSHOPS" counter pill, and
+                "+ PROPOSER UN WORKSHOP" button all render.
+              - Filter row 1 "STYLE DE DANSE" with chips TOUS/SALSA CUBAINE/
+                ON2/MULTI-STYLES/AUTRE.
+              - Filter row 2 "PROFESSEUR" with chips TOUS + OBINISA RELÁMPAGO +
+                YANET FUENTES (testIDs filter-teacher-all, filter-teacher-<id>).
+              - Clicking OBINISA filters to 1 card (his Stage workshop).
+              - Combining SALSA CUBAINE + OBINISA correctly intersects to 0
+                cards (OBINISA's workshop is MULTI not salsa_cubaine) and the
+                empty state shows the "RÉINITIALISER LES FILTRES" link
+                (testID reset-filters). Intersection logic works.
+
+            T3 BIS — Card teacher link (PASS, 5/5 functional):
+              - Each workshop card with a teacher_id renders a Pressable with
+                testID `card-teacher-link-<teacher_id>` whose text is
+                "AVEC <TEACHER NAME>" in yellow (rgb(245,197,24)),
+                text-decoration: underline. Arrow icon (Ionicons
+                arrow-forward, \uf133) IS rendered (the auto-test marked
+                "no SVG arrow icon" as fail but Ionicons web uses font glyphs,
+                not SVG — visible in card text trailing "\uf133").
+              - Clicking the link navigates to /profs/{teacher_id} WITHOUT
+                bubbling to /entry/{id} (url confirmed to be
+                http://localhost:3000/profs/<uuid>, no /entry/).
+
+            T4 — Artist profile (PASS): page renders header "FICHE ARTISTE",
+            initials placeholder (e.g. "YA"), name "Yanet Fuentes", yellow
+            dance-style chips (AFRO-CUBAIN / RUMBA / LADY CUBAN STYLE), bio
+            paragraph, and the "Workshops à venir" section. (Header reads
+            FICHE ARTISTE per the earlier rename; review request acknowledged
+            both labels.)
+
+            T5 — Navigation regression: SOIRÉES → MENSUELLES → WORKSHOPS →
+            FESTIVALS cycle produced no app-level JS errors or broken UIs.
+            The 2 console errors captured are CORS preflight failures hitting
+            the preview backend from localhost origin (auth/me with
+            credentials:include) — same known dev-only quirk previously
+            documented; production same-origin is unaffected. No red screen,
+            no broken render.
+
+            Screenshots saved: .screenshots/01_home_soirees.png,
+            02_workshops.png, 03_profs_page.png.
+
 mensuelle_instagram_2026_05_18:
   - task: "Backend — Mensuelle type + instagram_post field"
     implemented: true

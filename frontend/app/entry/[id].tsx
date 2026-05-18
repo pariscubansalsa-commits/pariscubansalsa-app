@@ -297,9 +297,23 @@ export default function EntryDetail() {
 
         <View style={styles.body}>
           {entry.type === "workshop" && !!entry.instructor && (
-            <Text style={styles.overline}>
-              AVEC {entry.instructor.toUpperCase()}
-            </Text>
+            entry.teacher_id ? (
+              <TouchableOpacity
+                testID="detail-teacher-link"
+                onPress={() => router.push(`/profs/${entry.teacher_id}` as any)}
+                style={styles.teacherLinkRow}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.overline, styles.overlineLink]}>
+                  AVEC {entry.instructor.toUpperCase()}
+                </Text>
+                <Ionicons name="arrow-forward" size={12} color={COLORS.accentYellow} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.overline}>
+                AVEC {entry.instructor.toUpperCase()}
+              </Text>
+            )
           )}
           {entry.type === "soiree" && (
             <Text style={styles.overline}>SOIRÉE MENSUELLE</Text>
@@ -747,6 +761,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1.6,
     color: COLORS.secondaryText,
+    marginBottom: 8,
+  },
+  overlineLink: {
+    color: COLORS.accentYellow,
+    textDecorationLine: "underline",
+    marginBottom: 0,
+  },
+  teacherLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
     marginBottom: 8,
   },
   title: {

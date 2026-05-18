@@ -7,8 +7,10 @@ import {
   Image,
   Linking,
   Platform,
+  Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { COLORS, FONTS } from "./theme";
 import { EntryItem } from "./api";
 import { DanceStyleBadge } from "./DanceStyle";
@@ -70,11 +72,19 @@ export default function EntryCard({
   isAdmin?: boolean;
   onPress?: () => void;
 }) {
+  const router = useRouter();
   const isFestival = entry.type === "festival";
   const { day, month, weekday } = formatDateFR(entry.date);
   const rangeLabel = isFestival
     ? formatDateRangeFR(entry.date, entry.end_date)
     : null;
+
+  const openTeacher = (e: any) => {
+    if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+    if (entry.teacher_id) {
+      router.push(`/profs/${entry.teacher_id}` as any);
+    }
+  };
 
   const Wrapper: any = onPress ? TouchableOpacity : View;
   const wrapperProps = onPress
@@ -101,7 +111,24 @@ export default function EntryCard({
 
         <View style={styles.content}>
           {entry.type === "workshop" && !!entry.instructor && (
-            <Text style={styles.overline}>AVEC {entry.instructor.toUpperCase()}</Text>
+            entry.teacher_id ? (
+              <Pressable
+                onPress={openTeacher}
+                testID={`card-teacher-link-${entry.teacher_id}`}
+                style={({ pressed }) => [
+                  styles.teacherLinkWrap,
+                  pressed && { opacity: 0.6 },
+                ]}
+                hitSlop={6}
+              >
+                <Text style={[styles.overline, styles.overlineLink]}>
+                  AVEC {entry.instructor.toUpperCase()}
+                </Text>
+                <Ionicons name="arrow-forward" size={11} color={COLORS.accentYellow} />
+              </Pressable>
+            ) : (
+              <Text style={styles.overline}>AVEC {entry.instructor.toUpperCase()}</Text>
+            )
           )}
           {entry.type === "soiree" && (
             <Text style={styles.overline}>SOIRÉE MENSUELLE</Text>
@@ -239,6 +266,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1.4,
     color: COLORS.secondaryText,
+    marginBottom: 6,
+  },
+  overlineLink: {
+    color: COLORS.accentYellow,
+    textDecorationLine: "underline",
+    marginBottom: 0,
+  },
+  teacherLinkWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
     marginBottom: 6,
   },
   title: {
