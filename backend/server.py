@@ -551,7 +551,7 @@ async def root():
 
 # ========= Entries (agenda / soirées / workshops / festivals) =========
 
-VALID_TYPES = {"agenda", "soiree", "workshop", "festival"}
+VALID_TYPES = {"agenda", "soiree", "workshop", "festival", "mensuelle"}
 
 
 def normalize_dance_style(value: Optional[str]) -> str:
