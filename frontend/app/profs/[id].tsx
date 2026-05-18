@@ -18,7 +18,7 @@ import EntryCard from "../../src/EntryCard";
 import SubmitEntryButton from "../../src/SubmitEntryButton";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { track } from "../../src/analytics";
-import { openExternal, normalizeInstagramURL } from "../../src/links";
+import { openExternal, openInstagram } from "../../src/links";
 
 const openLink = (url: string) => openExternal(url);
 
@@ -136,7 +136,7 @@ export default function TeacherDetail() {
                 <TouchableOpacity
                   testID="ig-link"
                   style={styles.socialBtn}
-                  onPress={() => openExternal(normalizeInstagramURL(ig))}
+                  onPress={() => openInstagram(ig)}
                 >
                   <Ionicons name="logo-instagram" size={16} color={COLORS.primaryText} />
                   <Text style={styles.socialTxt}>@{ig}</Text>
