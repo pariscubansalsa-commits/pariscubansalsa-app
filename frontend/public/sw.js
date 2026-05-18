@@ -1,16 +1,18 @@
-/* Paris Cuban Salsa — basic service worker.
- * - Caches the app shell & static icons on install.
- * - Network-first for /api/* (dynamic data) with cache fallback.
- * - Cache-first for static assets (images, JS bundle, CSS).
- * - Falls back to /offline.html when both network and cache miss.
+/* Paris Cuban Salsa — Service Worker (defensive / asset-only mode).
+ *
+ * IMPORTANT: This SW NEVER intercepts API requests, NEVER intercepts
+ * cross-origin requests, NEVER serves cached responses for navigation
+ * (always goes to network for HTML).
+ *
+ * It only caches genuine static assets (JS bundle, CSS, fonts, icons, images)
+ * to make the app feel snappy after first load. Anything else falls through
+ * to the browser's default behavior.
  */
 
-const CACHE_VERSION = "pcs-v1.1.0";
-const SHELL_CACHE = `${CACHE_VERSION}-shell`;
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const CACHE_VERSION = "pcs-v2.0.0";
+const STATIC_CACHE = `${CACHE_VERSION}-static`;
 
-const SHELL_ASSETS = [
-  "/",
+const PRECACHE_ASSETS = [
   "/manifest.json",
   "/offline.html",
   "/icons/icon-192.png",
@@ -18,11 +20,14 @@ const SHELL_ASSETS = [
   "/icons/apple-touch-icon.png",
 ];
 
+// File extensions we are willing to cache (static assets only)
+const CACHEABLE_EXT = /\.(?:js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico)(?:\?.*)?$/i;
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
-      .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_ASSETS).catch(() => {}))
+      .open(STATIC_CACHE)
+      .then((cache) => cache.addAll(PRECACHE_ASSETS).catch(() => {}))
       .then(() => self.skipWaiting()),
   );
 });
@@ -44,49 +49,64 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+
+  // 1. Only handle GET. Everything else (POST, PUT, DELETE) passes through.
   if (req.method !== "GET") return;
 
-  const url = new URL(req.url);
-  // Same-origin only
+  let url;
+  try {
+    url = new URL(req.url);
+  } catch (_) {
+    return;
+  }
+
+  // 2. Cross-origin requests (e.g. api.pariscubansalsa.com, Railway, GA,
+  //    Google Auth) — NEVER intercept. Let the browser handle them.
   if (url.origin !== self.location.origin) return;
 
-  // API: network-first
-  if (url.pathname.startsWith("/api/")) {
+  // 3. API requests — NEVER intercept. Pass through to the network.
+  //    (Belt-and-suspenders even though api should be cross-origin.)
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/api-")) {
+    return;
+  }
+
+  // 4. Navigation (HTML pages) — NEVER serve from cache. Always go to network
+  //    so the user gets the latest deployment. If offline, fall back to
+  //    /offline.html.
+  if (req.mode === "navigate" || req.destination === "document") {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(RUNTIME_CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(req)),
+      fetch(req).catch(() => caches.match("/offline.html")),
     );
     return;
   }
 
-  // Navigation: network-first, fallback to offline.html
-  if (req.mode === "navigate") {
+  // 5. Static asset? Cache-first with network update.
+  if (CACHEABLE_EXT.test(url.pathname)) {
     event.respondWith(
-      fetch(req).catch(() =>
-        caches.match(req).then((res) => res || caches.match("/offline.html")),
-      ),
+      caches.match(req).then((cached) => {
+        const networkFetch = fetch(req)
+          .then((res) => {
+            if (res && res.ok && res.type === "basic") {
+              const copy = res.clone();
+              caches.open(STATIC_CACHE).then((c) => c.put(req, copy)).catch(() => {});
+            }
+            return res;
+          })
+          .catch(() => cached);
+        return cached || networkFetch;
+      }),
     );
     return;
   }
 
-  // Static: cache-first
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (res.ok && (res.type === "basic" || res.type === "cors")) {
-            const copy = res.clone();
-            caches.open(RUNTIME_CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match("/offline.html"));
-    }),
-  );
+  // 6. Anything else — pass through (no SW involvement).
+});
+
+/* Allow the page to ask the SW to update or self-destruct.
+ * Useful during dev / after major deploys. */
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
+  if (event.data === "CLEAR_CACHES") {
+    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))));
+  }
 });

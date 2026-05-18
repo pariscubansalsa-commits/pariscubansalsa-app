@@ -9,8 +9,9 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -110,10 +111,10 @@ function Inner() {
     try {
       if (isNew) {
         await api.artisteCreateWorkshop(token, body);
-        Alert.alert("Soumis", "Workshop en attente de validation.");
+        notify("Soumis", "Workshop en attente de validation.");
       } else {
         await api.artisteUpdateWorkshop(token, params.id as string, body);
-        Alert.alert("Mis à jour", "Modifications enregistrées.");
+        notify("Mis à jour", "Modifications enregistrées.");
       }
       router.replace("/artiste/dashboard" as any);
     } catch (e: any) {

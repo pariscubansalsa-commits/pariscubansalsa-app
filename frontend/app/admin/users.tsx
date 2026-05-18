@@ -6,8 +6,9 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -58,7 +59,7 @@ function Inner() {
       const data = await api.adminListUsers(token, { role });
       setUsers(data as any);
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "");
+      notify("Erreur", e.message || "");
     } finally {
       setLoading(false);
     }
@@ -70,39 +71,40 @@ function Inner() {
 
   const onApproveOrg = (u: UserRow) => {
     if (!token) return;
-    Alert.alert("Approuver", `Approuver le compte de ${u.organizer?.structure_name || u.name} ?`, [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Approuver",
-        onPress: async () => {
+    confirmAction({
+      title: "Approuver",
+      message: `Approuver le compte de ${u.organizer?.structure_name || u.name} ?`,
+      okLabel: "Approuver",
+      cancelLabel: "Annuler",
+      destructive: false,
+      onConfirm: async () => {
           try {
             await api.adminApproveOrganizer(token, u.user_id);
             reload();
           } catch (e: any) {
-            Alert.alert("Erreur", e.message || "");
+            notify("Erreur", e.message || "");
           }
         },
-      },
-    ]);
+    });
   };
 
   const onSuspend = (u: UserRow) => {
     if (!token) return;
-    Alert.alert("Suspendre", `Suspendre le compte ${u.email} ?`, [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Suspendre",
-        style: "destructive",
-        onPress: async () => {
+    confirmAction({
+      title: "Suspendre",
+      message: `Suspendre le compte ${u.email} ?`,
+      okLabel: "Suspendre",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: async () => {
           try {
             await api.adminSuspendUser(token, u.user_id);
             reload();
           } catch (e: any) {
-            Alert.alert("Erreur", e.message || "");
+            notify("Erreur", e.message || "");
           }
         },
-      },
-    ]);
+    });
   };
 
   const onReactivate = (u: UserRow) => {
@@ -112,7 +114,7 @@ function Inner() {
         await api.adminReactivateUser(token, u.user_id);
         reload();
       } catch (e: any) {
-        Alert.alert("Erreur", e.message || "");
+        notify("Erreur", e.message || "");
       }
     })();
   };
@@ -121,50 +123,46 @@ function Inner() {
     if (!token) return;
     const claim = u.pending_artist_claim || {};
     if (claim.teacher_id) {
-      Alert.alert(
-        "Valider le rattachement",
-        `Lier ${u.email} à la fiche "${claim.teacher_name || claim.teacher_id}" ?`,
-        [
-          { text: "Annuler", style: "cancel" },
-          {
-            text: "Valider",
-            onPress: async () => {
+      confirmAction({
+      title: "Valider le rattachement",
+      message: `Lier ${u.email} à la fiche "${claim.teacher_name || claim.teacher_id}" ?`,
+      okLabel: "Valider",
+      cancelLabel: "Annuler",
+      destructive: false,
+      onConfirm: async () => {
               try {
                 await api.adminApproveArtist(token, u.user_id, { teacher_id: claim.teacher_id });
                 reload();
               } catch (e: any) {
-                Alert.alert("Erreur", e.message || "");
+                notify("Erreur", e.message || "");
               }
             },
-          },
-        ]
-      );
+    });
     } else {
-      Alert.alert(
+      notify(
         "Création de fiche requise",
-        `Cet artiste a demandé la création d'une nouvelle fiche : "${claim.requested_name || "?"}".\n\nCréez d'abord la fiche dans /admin/teachers, puis rouvrez cette page pour la lier.`,
-        [{ text: "OK" }]
+        `Cet artiste a demandé la création d'une nouvelle fiche : "${claim.requested_name || "?"}".\n\nCréez d'abord la fiche dans /admin/teachers, puis rouvrez cette page pour la lier.`
       );
     }
   };
 
   const onRejectArtist = (u: UserRow) => {
     if (!token) return;
-    Alert.alert("Refuser la demande", `Refuser le claim de ${u.email} ?`, [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Refuser",
-        style: "destructive",
-        onPress: async () => {
+    confirmAction({
+      title: "Refuser la demande",
+      message: `Refuser le claim de ${u.email} ?`,
+      okLabel: "Refuser",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: async () => {
           try {
             await api.adminRejectArtist(token, u.user_id);
             reload();
           } catch (e: any) {
-            Alert.alert("Erreur", e.message || "");
+            notify("Erreur", e.message || "");
           }
         },
-      },
-    ]);
+    });
   };
 
   return (

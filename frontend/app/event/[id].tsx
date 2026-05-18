@@ -12,9 +12,10 @@ import {
   ScrollView,
   Dimensions,
   Platform,
-  Alert,
+
   KeyboardAvoidingView,
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -122,7 +123,7 @@ export default function EventDetail() {
       showToast("PHOTO ENREGISTRÉE");
     } catch (e) {
       console.log("download err", e);
-      Alert.alert("Téléchargement échoué");
+      notify("Téléchargement échoué");
     }
   };
 
@@ -340,14 +341,14 @@ export default function EventDetail() {
                       Platform.OS === "web"
                         ? window.confirm("Delete this photo?") &&
                           handleDeletePhoto(activePhoto.id)
-                        : Alert.alert("Delete photo?", "", [
-                            { text: "Cancel" },
-                            {
-                              text: "Delete",
-                              style: "destructive",
-                              onPress: () => handleDeletePhoto(activePhoto.id),
-                            },
-                          ])
+                        : confirmAction({
+      title: "Delete photo?",
+      message: "",
+      okLabel: "Delete",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: () => handleDeletePhoto(activePhoto.id),
+    })
                     }
                     style={styles.lbBtn}
                   >

@@ -9,11 +9,12 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { confirmAction, notify } from "../../src/dialog";
 import { useAuth } from "../../src/auth";
 import { api, TeacherItem } from "../../src/api";
 import { Logo } from "../../src/Logo";
@@ -96,7 +97,7 @@ export default function ArtisteSignup() {
         message: message.trim(),
       });
       await refresh();
-      Alert.alert(
+      notify(
         "Demande envoyée",
         tab === "existing"
           ? "Votre demande sera validée par l'admin."

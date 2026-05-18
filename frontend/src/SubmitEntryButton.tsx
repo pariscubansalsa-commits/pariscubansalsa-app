@@ -9,9 +9,10 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
   Image,
 } from "react-native";
+import { confirmAction, notify } from "./dialog";
 import { Ionicons } from "@expo/vector-icons";
 import { api, TeacherItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
@@ -117,7 +118,7 @@ export default function SubmitEntryButton({
     ) {
       const msg = "Titre, date, votre nom et votre email sont obligatoires.";
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Champs manquants", msg);
+      else notify("Champs manquants", msg);
       return;
     }
     setSubmitting(true);
@@ -132,7 +133,7 @@ export default function SubmitEntryButton({
     } catch (e: any) {
       const msg = "Erreur : " + (e.message || "envoi impossible");
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Erreur", msg);
+      else notify("Erreur", msg);
     } finally {
       setSubmitting(false);
     }

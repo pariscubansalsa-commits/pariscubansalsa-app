@@ -7,9 +7,10 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
-  Alert,
+
   Platform,
 } from "react-native";
+import { confirmAction, notify } from "../../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -77,10 +78,14 @@ export default function AdminEvent() {
       Platform.OS === "web"
         ? window.confirm("Delete this photo?")
         : await new Promise<boolean>((resolve) =>
-            Alert.alert("Delete photo?", "", [
-              { text: "Cancel", onPress: () => resolve(false) },
-              { text: "Delete", style: "destructive", onPress: () => resolve(true) },
-            ])
+            confirmAction({
+      title: "Delete photo?",
+      message: "",
+      okLabel: "Delete",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: () => resolve(true),
+    })
           );
     if (!ok) return;
     await api.deletePhoto(token, pid);

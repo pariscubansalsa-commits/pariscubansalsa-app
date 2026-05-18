@@ -9,8 +9,9 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -122,10 +123,10 @@ function Inner() {
     try {
       if (isNew) {
         await api.organisateurCreateEntry(token, body);
-        Alert.alert("Soumis", "Votre événement est en attente de validation.");
+        notify("Soumis", "Votre événement est en attente de validation.");
       } else {
         await api.organisateurUpdateEntry(token, params.id as string, body);
-        Alert.alert("Mis à jour", "Modifications enregistrées. L'événement reste en attente de validation.");
+        notify("Mis à jour", "Modifications enregistrées. L'événement reste en attente de validation.");
       }
       router.replace("/organisateur/dashboard" as any);
     } catch (e: any) {

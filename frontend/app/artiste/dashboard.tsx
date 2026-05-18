@@ -7,11 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
+
   Image,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -85,7 +86,7 @@ function Inner() {
         facebook,
         dance_styles: danceStyles,
       });
-      Alert.alert("Profil mis à jour", "Vos modifications ont été enregistrées.");
+      notify("Profil mis à jour", "Vos modifications ont été enregistrées.");
       reload();
     } catch (e: any) {
       setError(e.message || "Erreur");
@@ -96,21 +97,21 @@ function Inner() {
 
   const onDeleteWorkshop = (id: string) => {
     if (!token) return;
-    Alert.alert("Supprimer", "Confirmer la suppression de ce workshop ?", [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Supprimer",
-        style: "destructive",
-        onPress: async () => {
+    confirmAction({
+      title: "Supprimer",
+      message: "Confirmer la suppression de ce workshop ?",
+      okLabel: "Supprimer",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: async () => {
           try {
             await api.artisteDeleteWorkshop(token, id);
             reload();
           } catch (e: any) {
-            Alert.alert("Erreur", e.message || "");
+            notify("Erreur", e.message || "");
           }
         },
-      },
-    ]);
+    });
   };
 
   if (loading) {

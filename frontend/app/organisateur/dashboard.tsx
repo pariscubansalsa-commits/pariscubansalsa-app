@@ -6,8 +6,9 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -57,21 +58,21 @@ function Inner() {
 
   const onDelete = (id: string) => {
     if (!token) return;
-    Alert.alert("Supprimer", "Confirmer la suppression de cet événement ?", [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Supprimer",
-        style: "destructive",
-        onPress: async () => {
+    confirmAction({
+      title: "Supprimer",
+      message: "Confirmer la suppression de cet événement ?",
+      okLabel: "Supprimer",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: async () => {
           try {
             await api.organisateurDeleteEntry(token, id);
             reload();
           } catch (e: any) {
-            Alert.alert("Erreur", e.message || "");
+            notify("Erreur", e.message || "");
           }
         },
-      },
-    ]);
+    });
   };
 
   const isPending = user?.status === "pending";

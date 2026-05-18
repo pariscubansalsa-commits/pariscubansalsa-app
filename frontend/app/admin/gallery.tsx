@@ -12,8 +12,9 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -70,7 +71,7 @@ export default function AdminHome() {
     if (!token) return;
     if (!name.trim() || !date.trim()) {
       if (Platform.OS === "web") window.alert("Nom et date sont requis");
-      else Alert.alert("Champs manquants", "Nom et date sont requis");
+      else notify("Champs manquants", "Nom et date sont requis");
       return;
     }
     setSubmitting(true);
@@ -101,10 +102,14 @@ export default function AdminHome() {
       Platform.OS === "web"
         ? window.confirm("Supprimer cet événement et toutes ses photos ?")
         : await new Promise<boolean>((resolve) =>
-            Alert.alert("Supprimer l'événement ?", "Cette action est irréversible.", [
-              { text: "Annuler", onPress: () => resolve(false) },
-              { text: "Supprimer", style: "destructive", onPress: () => resolve(true) },
-            ])
+            confirmAction({
+      title: "Supprimer l'événement ?",
+      message: "Cette action est irréversible.",
+      okLabel: "Supprimer",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: () => resolve(true),
+    })
           );
     if (!ok) return;
     await api.deleteEvent(token, id);

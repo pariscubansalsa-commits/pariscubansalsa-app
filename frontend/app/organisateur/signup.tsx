@@ -9,8 +9,9 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -81,10 +82,7 @@ export default function OrganisateurSignup() {
         website: website.trim(),
       });
       await refresh();
-      Alert.alert(
-        "Compte créé",
-        "Votre demande est en attente d'approbation. Vous pouvez déjà soumettre des événements."
-      );
+      notify("Compte créé", "Votre demande est en attente d'approbation. Vous pouvez déjà soumettre des événements.");
       router.replace("/organisateur/dashboard" as any);
     } catch (e: any) {
       setError(e.message || "Une erreur est survenue.");

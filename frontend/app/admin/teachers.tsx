@@ -11,8 +11,9 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
+import { confirmAction, notify } from "../../src/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -140,10 +141,14 @@ export default function AdminTeachers() {
       Platform.OS === "web"
         ? window.confirm("Supprimer cet artiste ?")
         : await new Promise<boolean>((r) =>
-            Alert.alert("Supprimer ?", "", [
-              { text: "Annuler", onPress: () => r(false) },
-              { text: "Supprimer", style: "destructive", onPress: () => r(true) },
-            ])
+            confirmAction({
+      title: "Supprimer ?",
+      message: "",
+      okLabel: "Supprimer",
+      cancelLabel: "Annuler",
+      destructive: true,
+      onConfirm: () => r(true),
+    })
           );
     if (!ok) return;
     await api.deleteTeacher(token, id);

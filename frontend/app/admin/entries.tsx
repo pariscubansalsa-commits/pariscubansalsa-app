@@ -10,7 +10,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -20,6 +20,7 @@ import { api, EntryItem, EntryType } from "../../src/api";
 import EntryCard from "../../src/EntryCard";
 import { DanceStyleBadge, DanceStyleChips, DanceStyle } from "../../src/DanceStyle";
 import RecurrenceSection, { Recurrence, RecurrenceScopeChooser } from "../../src/Recurrence";
+import { confirmAction, notify } from "../../src/dialog";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
@@ -138,8 +139,7 @@ export default function AdminEntries() {
   const submit = async () => {
     if (!token) return;
     if (!form.title.trim() || !form.date.trim()) {
-      if (Platform.OS === "web") window.alert("Titre et date requis");
-      else Alert.alert("Champs manquants", "Titre et date sont requis");
+      notify("Champs manquants", "Titre et date sont requis");
       return;
     }
     setSubmitting(true);
@@ -150,26 +150,28 @@ export default function AdminEntries() {
       setModalOpen(false);
       await load();
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert("Erreur: " + e.message);
+      notify("Erreur", e.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!token) return;
-    const ok =
-      Platform.OS === "web"
-        ? window.confirm("Supprimer cette entrée ?")
-        : await new Promise<boolean>((r) =>
-            Alert.alert("Supprimer ?", "", [
-              { text: "Annuler", onPress: () => r(false) },
-              { text: "Supprimer", style: "destructive", onPress: () => r(true) },
-            ])
-          );
-    if (!ok) return;
-    await api.deleteEntry(token, id);
-    setItems((prev) => prev.filter((x) => x.id !== id));
+    confirmAction({
+      title: "Supprimer cette entrée ?",
+      message: "Cette action est irréversible.",
+      okLabel: "Supprimer",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteEntry(token, id);
+          setItems((prev) => prev.filter((x) => x.id !== id));
+        } catch (e: any) {
+          notify("Erreur", e.message);
+        }
+      },
+    });
   };
 
   const handleApprove = async (id: string, type?: EntryType) => {
@@ -211,20 +213,18 @@ export default function AdminEntries() {
     setItems((prev) => prev.filter((x) => x.id !== id));
   };
 
-  const handleReject = async (id: string) => {
+  const handleReject = (id: string) => {
     if (!token) return;
-    const ok =
-      Platform.OS === "web"
-        ? window.confirm("Refuser cette proposition ? Elle sera archivée.")
-        : await new Promise<boolean>((r) =>
-            Alert.alert("Refuser ?", "Cette proposition sera archivée.", [
-              { text: "Annuler", onPress: () => r(false) },
-              { text: "Refuser", style: "destructive", onPress: () => r(true) },
-            ])
-          );
-    if (!ok) return;
-    await api.rejectEntry(token, id);
-    setItems((prev) => prev.filter((x) => x.id !== id));
+    confirmAction({
+      title: "Refuser cette proposition ?",
+      message: "Elle sera archivée.",
+      okLabel: "Refuser",
+      destructive: true,
+      onConfirm: async () => {
+        await api.rejectEntry(token, id);
+        setItems((prev) => prev.filter((x) => x.id !== id));
+      },
+    });
   };
 
   const handleFeature = async (id: string) => {
