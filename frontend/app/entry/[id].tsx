@@ -25,6 +25,8 @@ import { useShareMenu } from "../../src/ShareMenu";
 import { track } from "../../src/analytics";
 import { confirmAction, notify } from "../../src/dialog";
 import InstagramEmbed from "../../src/InstagramEmbed";
+import EntryGallery from "../../src/EntryGallery";
+import AdminGalleryManager from "../../src/AdminGalleryManager";
 
 async function openLink(url: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -76,6 +78,8 @@ export default function EntryDetail() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [galleryManagerOpen, setGalleryManagerOpen] = useState(false);
+  const [galleryReloadKey, setGalleryReloadKey] = useState(0);
   const { triggerShare, ShareMenu } = useShareMenu();
 
   const showToast = (msg: string) => {
@@ -387,6 +391,23 @@ export default function EntryDetail() {
             <Text style={styles.secondaryTxt}>PARTAGER CET ÉVÉNEMENT</Text>
           </TouchableOpacity>
 
+          {/* Public gallery for festivals (renders nothing if no media) */}
+          {entry.type === "festival" && (
+            <EntryGallery entryId={entry.id} reloadKey={galleryReloadKey} />
+          )}
+
+          {/* Admin: GÉRER LA GALERIE button for festivals */}
+          {isAdmin && entry.type === "festival" && (
+            <TouchableOpacity
+              testID="detail-gallery-manage"
+              style={[styles.secondaryBtn, { marginTop: 14 }]}
+              onPress={() => setGalleryManagerOpen(true)}
+            >
+              <Ionicons name="images-outline" size={16} color={COLORS.primaryText} />
+              <Text style={styles.secondaryTxt}>GÉRER LA GALERIE</Text>
+            </TouchableOpacity>
+          )}
+
           {isAdmin && (
             <View style={styles.adminPanel}>
               <View style={styles.adminPanelHead}>
@@ -451,6 +472,17 @@ export default function EntryDetail() {
       </ScrollView>
 
       <ShareMenu />
+
+      {/* Admin: gallery management modal */}
+      {isAdmin && !!token && (
+        <AdminGalleryManager
+          visible={galleryManagerOpen}
+          onClose={() => setGalleryManagerOpen(false)}
+          entryId={entry.id}
+          token={token}
+          onChanged={() => setGalleryReloadKey((k) => k + 1)}
+        />
+      )}
 
       {/* Edit modal */}
       <Modal

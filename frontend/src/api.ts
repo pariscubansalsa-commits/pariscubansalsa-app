@@ -83,6 +83,16 @@ export type TeacherItem = {
   created_at?: string;
 };
 
+export type EntryMediaItem = {
+  id: string;
+  entry_id: string;
+  kind: "photo" | "video";
+  data: string; // base64 data URI for photos, URL for videos
+  title?: string;
+  order: number;
+  created_at?: string;
+};
+
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
@@ -285,6 +295,38 @@ export const api = {
     fetch(`${API}/teachers`).then((r) => handle<TeacherItem[]>(r)),
   getTeacher: (id: string) =>
     fetch(`${API}/teachers/${id}`).then((r) => handle<TeacherItem>(r)),
+
+  // Entry media / Festival galleries
+  listEntryMedia: (entryId: string) =>
+    fetch(`${API}/entries/${entryId}/media`).then((r) => handle<EntryMediaItem[]>(r)),
+  addEntryMedia: (
+    token: string,
+    entryId: string,
+    items: { kind: "photo" | "video"; data: string; title?: string }[]
+  ) =>
+    fetch(`${API}/entries/${entryId}/media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify({ items }),
+    }).then((r) => handle<EntryMediaItem[]>(r)),
+  deleteEntryMedia: (token: string, mediaId: string) =>
+    fetch(`${API}/media/${mediaId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+      credentials: "include",
+    }).then((r) => handle<{ ok: boolean; id: string }>(r)),
+  reorderEntryMedia: (token: string, entryId: string, ids: string[]) =>
+    fetch(`${API}/entries/${entryId}/media/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      credentials: "include",
+      body: JSON.stringify({ ids }),
+    }).then((r) => handle<{ ok: boolean; count: number }>(r)),
+  listPastFestivalsWithGallery: () =>
+    fetch(`${API}/festivals/past-with-gallery`).then((r) =>
+      handle<EntryItem[]>(r)
+    ),
   createTeacher: (token: string, body: Partial<TeacherItem>) =>
     fetch(`${API}/teachers`, {
       method: "POST",

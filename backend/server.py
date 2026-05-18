@@ -2066,6 +2066,120 @@ async def analytics_dashboard(period: str = "30d", _user: User = Depends(require
     }
 
 
+# ========= Entry Media / Gallery (TÂCHE 4 — Festival galleries) =========
+
+
+class EntryMedia(BaseModel):
+    """One photo or video attached to a festival/entry gallery."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    entry_id: str
+    kind: str  # 'photo' (base64 data URI) | 'video' (YouTube/Instagram URL)
+    data: str  # base64 data URI for photos, public URL for videos
+    title: Optional[str] = ""
+    order: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EntryMediaInput(BaseModel):
+    kind: str  # 'photo' | 'video'
+    data: str
+    title: Optional[str] = ""
+
+
+class EntryMediaBulkInput(BaseModel):
+    items: List[EntryMediaInput]
+
+
+class EntryMediaOrderInput(BaseModel):
+    ids: List[str]  # in the new desired order
+
+
+@api_router.get("/entries/{entry_id}/media", response_model=List[EntryMedia])
+async def list_entry_media(entry_id: str):
+    cursor = db.entry_media.find({"entry_id": entry_id}, {"_id": 0}).sort("order", 1)
+    return [EntryMedia(**m) async for m in cursor]
+
+
+@api_router.post("/entries/{entry_id}/media", response_model=List[EntryMedia])
+async def add_entry_media(
+    entry_id: str,
+    payload: EntryMediaBulkInput,
+    _user: User = Depends(require_admin),
+):
+    """Admin: add a batch of photos/videos to a festival/entry gallery."""
+    entry = await db.entries.find_one({"id": entry_id}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    # Compute starting order = current max + 1
+    last = await db.entry_media.find_one(
+        {"entry_id": entry_id}, {"_id": 0, "order": 1}, sort=[("order", -1)]
+    )
+    start = (last["order"] + 1) if last else 0
+    inserted: List[EntryMedia] = []
+    for i, it in enumerate(payload.items):
+        if it.kind not in ("photo", "video"):
+            raise HTTPException(status_code=400, detail=f"Invalid kind '{it.kind}'")
+        if not it.data or not it.data.strip():
+            raise HTTPException(status_code=400, detail="Missing media data")
+        m = EntryMedia(
+            entry_id=entry_id,
+            kind=it.kind,
+            data=it.data,
+            title=it.title or "",
+            order=start + i,
+        )
+        await db.entry_media.insert_one(m.dict())
+        inserted.append(m)
+    return inserted
+
+
+@api_router.delete("/media/{media_id}")
+async def delete_entry_media(media_id: str, _user: User = Depends(require_admin)):
+    res = await db.entry_media.delete_one({"id": media_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Media not found")
+    return {"ok": True, "id": media_id}
+
+
+@api_router.put("/entries/{entry_id}/media/order")
+async def reorder_entry_media(
+    entry_id: str,
+    payload: EntryMediaOrderInput,
+    _user: User = Depends(require_admin),
+):
+    """Admin: set the order of media items by passing the full ordered list of ids."""
+    for i, mid in enumerate(payload.ids):
+        await db.entry_media.update_one(
+            {"id": mid, "entry_id": entry_id}, {"$set": {"order": i}}
+        )
+    return {"ok": True, "count": len(payload.ids)}
+
+
+@api_router.get("/festivals/past-with-gallery", response_model=List[Entry])
+async def list_past_festivals_with_gallery():
+    """Public: list past festivals that have at least one media item, most recent first."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    # Get media counts grouped by entry_id
+    pipeline = [{"$group": {"_id": "$entry_id", "n": {"$sum": 1}}}]
+    counts = {c["_id"]: c["n"] async for c in db.entry_media.aggregate(pipeline)}
+    if not counts:
+        return []
+    ids_with_media = list(counts.keys())
+    cursor = db.entries.find(
+        {
+            "id": {"$in": ids_with_media},
+            "type": "festival",
+            "status": {"$in": ["approved", "featured"]},
+            "$or": [
+                {"end_date": {"$lt": today, "$ne": None, "$ne": ""}},
+                {"$and": [{"end_date": {"$in": [None, ""]}}, {"date": {"$lt": today}}]},
+            ],
+        },
+        {"_id": 0},
+    ).sort("date", -1)
+    return [Entry(**e) async for e in cursor]
+
+
 # Re-include router so the analytics endpoints above are mounted
 app.include_router(api_router)
 

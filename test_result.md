@@ -511,8 +511,8 @@ agent_communication:
 
 metadata:
   created_by: "main_agent"
-  version: "1.2"
-  test_sequence: 2
+  version: "1.3"
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -520,6 +520,48 @@ test_plan:
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+tache_4_festival_galleries:
+  - task: "TÂCHE 4 — Festival galleries (entry_media) endpoints"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ALL 14 ASSERTIONS PASS — 0 failures.
+            Test script: /app/backend_test_gallery.py against
+            https://rhythm-frames-3.preview.emergentagent.com/api with admin
+            Bearer test_session_pcs_admin_000.
+
+            a) POST /api/entries (admin) festival 2024-05-10→2024-05-12,
+               status='approved', dance_style='salsa_cubaine' -> 200 with id ok.
+            b) GET /api/entries/{id}/media on a fresh festival -> 200 [].
+            c) POST /api/entries/{id}/media with 4 items (2 photos as base64
+               PNG, 1 YouTube URL, 1 Instagram URL) -> 200, returns 4 EntryMedia
+               objects with id, entry_id=FEST_ID, kind correct, order [0,1,2,3].
+            d) GET media -> 200, length=4, sorted by order asc
+               (titles: Photo 1, Photo 2, Aftermovie, Story IG).
+            e) GET /api/festivals/past-with-gallery -> 200, FEST_ID present.
+            f) PUT /api/entries/{id}/media/order (admin) with reversed ids ->
+               200 {ok:true, count:4}. Follow-up GET confirms the first
+               media is now what was previously the last (id swap correct).
+            g) DELETE /api/media/{first_media_id} (admin) -> 200. GET media
+               length is now 3.
+            h) POST add media without auth -> 401 'Authentication required'.
+            i) POST add media with kind='audio' -> 400 "Invalid kind 'audio'".
+            j) CLEANUP: deleted remaining 3 media items + the festival entry.
+               GET /festivals/past-with-gallery verified that FEST_ID is no
+               longer listed after the festival is removed.
+
+            All endpoints (GET/POST/PUT/DELETE media, GET past-with-gallery)
+            are correctly mounted under /api, admin auth enforced, and
+            past-festival filter works (festival end_date 2024-05-12 < today
+            2026-05-18). Database left clean.
 
 paris_cuban_salsa_expo_2026_05_18:
   - task: "TÂCHE 1+2+3+3BIS+5 — Bottom nav rename, /mensuelles, /workshops double filter, teacher link, artist profile"
