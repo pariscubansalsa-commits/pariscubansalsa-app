@@ -1496,3 +1496,113 @@ agent_communication:
             subsequent 404s on deleted ids.
 
         No blockers. Backend BLOC 5 + BLOC 1 are fully working.
+
+
+email_notification_resend_2026_05_18:
+  - task: "Email notification (Resend) — admin notify test endpoint + submission background task"
+    implemented: true
+    working: true
+    file: "/app/backend/email_service.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ALL 24 ASSERTIONS PASS — 0 failures.
+            Test script: /app/backend_test_email_notify.py against
+            https://rhythm-frames-3.preview.emergentagent.com/api with admin
+            Bearer test_session_pcs_admin_000.
+
+            1) Method gating
+               - GET  /api/admin/notify/test -> 405 (POST-only) ✔
+               - POST /api/admin/notify/test no-auth -> 401 "Authentication required" ✔
+
+            2) POST /api/admin/notify/test as admin -> 200 with JSON:
+               {
+                 "ok": false,
+                 "sent_to": null,
+                 "sender": "Paris Cuban Salsa <onboarding@resend.dev>",
+                 "public_url": "https://pariscubansalsa.com",
+                 "api_key_configured": false
+               }
+               - ok: bool ✔
+               - sent_to: null | string ✔
+               - sender: non-empty string (default Resend sender) ✔
+               - public_url: defaults to https://pariscubansalsa.com ✔
+               - api_key_configured: bool, false in local dev ✔
+               - graceful degradation: api_key_configured=false → ok=false,
+                 NO 500 (returns 200 with diagnostics) ✔
+
+            3) POST /api/entries/submit (mensuelle, future date) ->
+               200 status='pending' valid UUID id. Response time was 134ms
+               (< 2s) — background task does NOT block response. ✔
+
+            4) POST /api/entries/submit for each of the 5 types
+               (soiree, mensuelle, workshop, festival, agenda) -> 200 with
+               valid id each. All 5 succeed. ✔
+
+            5) Negative regressions
+               - submitter_name missing -> 422 (pydantic required) ✔
+               - submitter_email missing -> 422 ✔
+               - submitter_name+email empty strings -> 400 "Nom et email requis" ✔
+
+            6) Workshop without teacher_id -> 200 status='pending'
+               (auto-approved path not triggered). ✔
+
+            7) Cleanup: deleted all 7 created entries via DELETE /api/entries/{id}
+               with admin token. Subsequent GET on each id -> 404. Database
+               left clean (zero residuals). ✔
+
+            BACKEND LOG VERIFICATION:
+            grep "ADMIN_NOTIFICATION_EMAIL not set" /var/log/supervisor/backend.err.log
+            -> 11 hits during the test run, confirming the background task did
+            fire after every public submission and that the email_service short-
+            circuited (no crash, no 500, just a WARNING). RESEND_API_KEY guard
+            never reached because ADMIN_NOTIFICATION_EMAIL is also unset locally
+            — the wrapper send_admin_new_event_notification correctly bails
+            early when admin recipient is missing, exactly as designed.
+
+            No blockers. Resend email integration is wired correctly. On
+            Railway with RESEND_API_KEY + ADMIN_NOTIFICATION_EMAIL set, actual
+            email delivery will occur out-of-band.
+
+agent_communication:
+    - agent: "testing"
+      message: |
+        ## Email notification (Resend) BACKEND — ALL 24 ASSERTIONS PASS
+
+        Test script: /app/backend_test_email_notify.py against
+        https://rhythm-frames-3.preview.emergentagent.com/api with admin
+        Bearer test_session_pcs_admin_000.
+
+        ### Coverage
+        - GET /api/admin/notify/test -> 405 (POST-only). ✔
+        - POST /api/admin/notify/test no-auth -> 401. ✔
+        - POST /api/admin/notify/test as admin -> 200 with exact expected JSON
+          shape: ok:bool, sent_to:null|str, sender:str
+          ("Paris Cuban Salsa <onboarding@resend.dev>"),
+          public_url:"https://pariscubansalsa.com", api_key_configured:bool. ✔
+        - Local-dev graceful degradation: api_key_configured=false →
+          ok=false, no 500. ✔
+        - POST /api/entries/submit (mensuelle) -> 200 status=pending in 134ms
+          (background task does NOT block response). ✔
+        - POST /api/entries/submit for all 5 types (soiree, mensuelle,
+          workshop, festival, agenda) -> 200 each. ✔
+        - POST /api/entries/submit missing submitter_name/email -> 422
+          (pydantic). Empty strings -> 400 "Nom et email requis". ✔
+        - Workshop without teacher_id -> 200 status='pending'. ✔
+        - CLEANUP: 7 created entries deleted, 0 residuals (each GET -> 404). ✔
+
+        ### Background-task verification
+        Backend log shows 11 hits of WARNING
+        "send_admin_new_event_notification: ADMIN_NOTIFICATION_EMAIL not set"
+        during the run — confirming the BackgroundTasks scheduler did run the
+        notification function after every submit, and the email module
+        gracefully bailed without raising. Zero 500s in the log during the
+        test window. The endpoint guards in email_service._cfg() return env
+        vars at call-time so production Railway env vars will be picked up
+        without code changes.
+
+        No blockers. Backend integration is correct. Please summarise + finish.

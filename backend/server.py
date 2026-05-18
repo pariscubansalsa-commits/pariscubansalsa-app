@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -784,12 +784,13 @@ async def list_entries(
 
 
 @api_router.post("/entries/submit", response_model=Entry)
-async def submit_entry(payload: EntrySubmit):
+async def submit_entry(payload: EntrySubmit, background_tasks: BackgroundTasks):
     """Public endpoint: anyone (no auth required) can submit an event for admin review.
 
-    Accepts the 4 entry types (soiree, workshop, festival, agenda). The event
-    lands in the admin pending queue, with the submitter's contact info
-    (name, email, optional link).
+    Accepts the entry types (soiree, workshop, festival, agenda, mensuelle). The
+    event lands in the admin pending queue, with the submitter's contact info
+    (name, email, optional link). The admin inbox is notified by email
+    asynchronously (background task) so the user response is not delayed.
     """
     if payload.type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Type d'event invalide")
@@ -813,6 +814,14 @@ async def submit_entry(payload: EntrySubmit):
     data["source"] = "submission"
     entry = Entry(**data)
     await db.entries.insert_one(entry.dict())
+
+    # Notify admin inbox (only for pending submissions — auto-approved trusted
+    # teacher workshops don't need moderation). Runs in background so the
+    # public client gets an immediate response.
+    if not auto_approved:
+        from email_service import send_admin_new_event_notification
+        background_tasks.add_task(send_admin_new_event_notification, entry.dict())
+
     return entry
 
 
@@ -2301,6 +2310,35 @@ async def duplicate_next(
 
     await db.entries.insert_one(new_doc)
     return Entry(**new_doc)
+
+
+@api_router.post("/admin/notify/test")
+async def admin_notify_test(_user: User = Depends(require_admin)):
+    """Admin smoke-test: triggers a real email to ADMIN_NOTIFICATION_EMAIL with
+    a dummy entry. Returns the result and the env vars seen (without leaking
+    the API key itself)."""
+    from email_service import send_admin_new_event_notification, _cfg
+    cfg = _cfg()
+    dummy = {
+        "id": "test-" + str(uuid.uuid4())[:8],
+        "type": "mensuelle",
+        "title": "TEST — Email de notification",
+        "date": datetime.now(timezone.utc).date().isoformat(),
+        "time": "21:00",
+        "end_time": "02:00",
+        "venue": "Cabaret Sauvage",
+        "address": "59 Bd Macdonald, 75019 Paris",
+        "submitter_name": "Admin Test",
+        "submitter_email": cfg["admin"] or "test@example.com",
+    }
+    ok = await send_admin_new_event_notification(dummy)
+    return {
+        "ok": ok,
+        "sent_to": cfg["admin"] or None,
+        "sender": cfg["sender"],
+        "public_url": cfg["public_url"],
+        "api_key_configured": bool(cfg["api_key"]),
+    }
 
 
 # Re-include router so the analytics endpoints above are mounted
