@@ -253,6 +253,29 @@ VALID_ROLES = {"admin", "organisateur", "artiste", "visiteur"}
 VALID_USER_STATUSES = {"active", "pending", "suspended"}
 
 
+# ---- Password hashing (bcrypt via passlib) ----
+try:
+    from passlib.context import CryptContext
+    _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except Exception:  # pragma: no cover — passlib should always be installed
+    _pwd_context = None
+
+
+def _hash_password(plain: str) -> str:
+    if not _pwd_context:
+        raise RuntimeError("passlib not available")
+    return _pwd_context.hash(plain)
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    if not _pwd_context or not hashed:
+        return False
+    try:
+        return _pwd_context.verify(plain, hashed)
+    except Exception:
+        return False
+
+
 # ========= Auth =========
 
 async def get_current_user(request: Request) -> Optional[User]:
@@ -423,6 +446,75 @@ async def create_session(request: Request, response: Response):
         "artist_teacher_id": user_doc.get("artist_teacher_id"),
         "session_token": session_token,
     }
+
+
+@api_router.post("/auth/password-login")
+async def password_login(request: Request, response: Response):
+    """Email + password login fallback (used for PWA where OAuth callbacks
+    don't return to the standalone app reliably on iOS).
+
+    Returns the SAME shape as POST /auth/session so the frontend setSession()
+    call works identically.
+    """
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email et mot de passe requis")
+
+    user_doc = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user_doc or not user_doc.get("password_hash"):
+        # Constant-time-ish: don't reveal whether the email exists
+        await asyncio.sleep(0.2)
+        raise HTTPException(status_code=401, detail="Identifiants invalides")
+    if not _verify_password(password, user_doc["password_hash"]):
+        raise HTTPException(status_code=401, detail="Identifiants invalides")
+    if user_doc.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="Compte suspendu")
+
+    session_token = uuid.uuid4().hex + uuid.uuid4().hex  # 64-char
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": user_doc["user_id"],
+        "session_token": session_token,
+        "expires_at": expires_at,
+        "created_at": datetime.now(timezone.utc),
+    })
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+        max_age=7 * 24 * 60 * 60,
+    )
+    return {
+        "user_id": user_doc["user_id"],
+        "email": user_doc["email"],
+        "name": user_doc.get("name") or "",
+        "picture": user_doc.get("picture") or "",
+        "is_admin": bool(user_doc.get("is_admin")),
+        "role": user_doc.get("role") or ("admin" if user_doc.get("is_admin") else "visiteur"),
+        "status": user_doc.get("status") or "active",
+        "organizer": user_doc.get("organizer"),
+        "artist_teacher_id": user_doc.get("artist_teacher_id"),
+        "session_token": session_token,
+    }
+
+
+@api_router.post("/auth/set-password")
+async def set_password(request: Request, user: User = Depends(require_authenticated)):
+    """Authenticated user sets/updates their own password. Min 8 chars."""
+    body = await request.json()
+    new_password = (body.get("password") or "").strip()
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Mot de passe trop court (min 8 caractères)")
+    h = _hash_password(new_password)
+    await db.users.update_one(
+        {"user_id": user.user_id}, {"$set": {"password_hash": h}}
+    )
+    return {"ok": True}
 
 
 @api_router.get("/auth/me")
@@ -1384,6 +1476,66 @@ async def _gcal_periodic_loop():
 async def _startup_tasks():
     asyncio.create_task(_gcal_periodic_loop())
     logger.info("Google Calendar background sync scheduled every %ss", GCAL_SYNC_INTERVAL)
+    # Bootstrap admin password from env vars (idempotent — runs on every boot)
+    await _bootstrap_admin_password()
+
+
+async def _bootstrap_admin_password():
+    """Create or update the admin user defined by env vars.
+
+    Env vars (set on Railway):
+      - ADMIN_BOOTSTRAP_EMAIL   : e.g. pariscubansalsa@gmail.com
+      - ADMIN_BOOTSTRAP_PASSWORD: plaintext password (min 8 chars)
+      - ADMIN_BOOTSTRAP_NAME    : optional, defaults to "Admin"
+
+    If either env var is missing → skip silently. Designed so that turning the
+    feature on/off on Railway is just adding/removing env vars.
+    """
+    email = (os.getenv("ADMIN_BOOTSTRAP_EMAIL") or "").strip().lower()
+    password = (os.getenv("ADMIN_BOOTSTRAP_PASSWORD") or "").strip()
+    name = (os.getenv("ADMIN_BOOTSTRAP_NAME") or "Admin").strip() or "Admin"
+    if not email or not password:
+        return
+    if len(password) < 8:
+        logger.warning(
+            "_bootstrap_admin_password: ADMIN_BOOTSTRAP_PASSWORD too short (<8 chars), skipping"
+        )
+        return
+    try:
+        h = _hash_password(password)
+    except Exception as e:
+        logger.exception("Bootstrap password hashing failed: %s", e)
+        return
+
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {
+                "password_hash": h,
+                "is_admin": True,
+                "role": "admin",
+                "status": "active",
+            }},
+        )
+        logger.info("Admin password bootstrap: refreshed admin %s", email)
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": email,
+            "name": name,
+            "picture": "",
+            "is_admin": True,
+            "role": "admin",
+            "status": "active",
+            "organizer": None,
+            "artist_teacher_id": None,
+            "pending_artist_claim": None,
+            "password_hash": h,
+            "created_at": datetime.now(timezone.utc),
+        })
+        logger.info("Admin password bootstrap: created admin %s (%s)", email, user_id)
 
 
 # ========= Roles — Organisateur & Artiste signups =========

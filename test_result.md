@@ -521,6 +521,82 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+password_auth_pwa_2026_05_19:
+  - task: "PWA email/password auth — password-login + set-password + bootstrap"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ALL 30 ASSERTIONS PASS — 0 FAILURES.
+            Script: /app/backend_test_password_auth.py against
+            http://localhost:8001/api. Bootstrapped admin verified:
+            sarah@pariscubansalsa.test / motdepasse-test-pcs.
+
+            1) POST /api/auth/password-login with correct creds -> 200
+               with full session payload. Response shape verified:
+               user_id (str), email (lowercase match), name='Admin', picture='',
+               is_admin=true, role='admin', status='active',
+               session_token = 64-char lowercase hex string. ✔
+               GET /api/auth/me with Bearer <session_token> -> 200, email and
+               is_admin match. ✔
+
+            2) Negative cases all PASS:
+               - wrong password -> 401 {"detail":"Identifiants invalides"} ✔
+               - unknown email -> 401 {"detail":"Identifiants invalides"}
+                 (no email enumeration leak) ✔
+               - empty email+password -> 400 "Email et mot de passe requis" ✔
+               - empty password only -> 400 ✔
+               - empty email only -> 400 ✔
+               - "SARAH@PARISCUBANSALSA.TEST" -> 200 (case-insensitive) ✔
+
+            3) set-password flow all PASS:
+               - login -> T1 (64-char hex). ✔
+               - POST /api/auth/set-password Bearer T1 {password:"nouveau-…"}
+                 -> 200 {"ok":true}. ✔
+               - login with OLD password -> 401 ✔
+               - login with NEW password -> 200 (T2 obtained) ✔
+               - set-password with "abc" -> 400
+                 "Mot de passe trop court (min 8 caractères)" ✔
+               - set-password without auth -> 401 "Authentication required" ✔
+
+            4) Admin actions with new bearer T2 PASS:
+               - GET /api/entries?status=pending -> 200 (admin-only,
+                 confirms role enforcement). ✔
+               - POST /api/admin/notify/test -> 200. Response:
+                 {ok:false, sent_to:null, sender:"Paris Cuban Salsa
+                 <onboarding@resend.dev>", api_key_configured:false}.
+                 NOTE: ok=false is expected (RESEND_API_KEY not configured
+                 in this environment) — the endpoint itself returns 200,
+                 which is the auth-pass we needed to verify. The actual
+                 email send is GRACEFULLY DEGRADED, NOT BROKEN.
+
+            5) CLEANUP / reset PASS:
+               - set-password back to "motdepasse-test-pcs" via T2 -> 200 ✔
+               - login with original password again -> 200 ✔
+               Sarah is left in the database with the ORIGINAL bootstrap
+               password, ready for the next test run. User NOT deleted.
+
+            6) Bogus token regression PASS:
+               - GET /api/auth/me Bearer "bogus_token_does_not_exist_xyz123"
+                 -> 401 {"detail":"Not authenticated"} (NOT 500). ✔
+               - GET /api/auth/me Bearer "000…000" (64-char) -> 401. ✔
+
+            Side observation (not a bug): backend logs show a one-time
+            passlib warning "trapped error reading bcrypt version"
+            (AttributeError on bcrypt.__about__) — this is the well-known
+            passlib<>bcrypt-4 compatibility cosmetic warning. Hashing
+            and verification still work correctly (bcrypt is fully
+            functional). No action required.
+
+            test_credentials.md updated with the new admin credentials
+            and endpoint usage notes.
+
 tache_4_festival_galleries:
   - task: "TÂCHE 4 — Festival galleries (entry_media) endpoints"
     implemented: true

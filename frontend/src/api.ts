@@ -389,6 +389,14 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId }),
     }).then((r) => handle<any>(r)),
 
+  passwordLogin: (email: string, password: string) =>
+    fetch(`${API}/auth/password-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ email, password }),
+    }).then((r) => handle<any>(r)),
+
   authMe: (token?: string) =>
     fetch(`${API}/auth/me`, {
       credentials: "include",
