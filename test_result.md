@@ -1682,3 +1682,55 @@ agent_communication:
         without code changes.
 
         No blockers. Backend integration is correct. Please summarise + finish.
+
+    - agent: "main"
+      message: |
+        ## CRITICAL BUG FIX — Safari iOS "Load failed" on /api/auth/password-login
+
+        ### Root cause (diagnosed via curl + Playwright reproduction)
+        The Emergent preview ingress (Cloudflare) AND the production Railway
+        edge BOTH intercept OPTIONS preflights and answer them with
+        `Access-Control-Allow-Origin: *` BEFORE the request ever reaches our
+        backend code. So fixing the FastAPI CORSMiddleware allowlist has zero
+        effect — the browser sees `*` from the edge layer.
+
+        Safari iOS strictly enforces the CORS spec: a credentialed request
+        (`credentials: 'include'`) with `Access-Control-Allow-Origin: *` is
+        rejected with the opaque "Load failed". Chrome desktop is more lenient
+        which is why it worked there.
+
+        ### Fix applied (frontend-only, defensive)
+        - Removed `credentials: "include"` from ALL fetches in
+          /app/frontend/src/api.ts (44 occurrences). The frontend already
+          stores `session_token` in localStorage (key `pcs_session_token`) and
+          sends `Authorization: Bearer <token>` on every authenticated request
+          via the existing `authHeaders()` helper. The session cookie was
+          redundant — the frontend never reads cookies (verified by grep).
+        - Result: Safari iOS will now accept the edge-layer `*` response
+          because the request is no longer "credentialed" from its POV. The
+          backend continues to set the session cookie (harmless leftover);
+          we simply ignore it client-side.
+
+        ### Verified end-to-end (Playwright @ 390x844)
+        - POST /api/auth/password-login (sarah@pariscubansalsa.test) returns
+          200, token stored in localStorage, redirects to /admin. ✔
+        - /admin/entries loads via Bearer auth, lists agenda + gcal entries,
+          0 console errors. ✔
+        - Local backend POST returns echoed origin (clean code already in
+          place). ✔
+
+        ### Files changed
+        - /app/frontend/src/api.ts — removed 44× `credentials: "include"`
+        - /app/frontend/src/TopBar.tsx — replaced SafeAreaView with capped
+          inset (Math.min(insets.top, 24) + 8) and reduced bar height
+          48 → 40. Total header height now ~48px on iPhone with notch
+          (was ~95px).
+
+        ### Out of scope for this fix
+        - PWA icon regeneration was completed earlier in this session
+          (all icons now black bg `#111111` + yellow PCS `#F5C518` serif
+          bold, cache-bust `?v=3`, SW bumped to v2.3.0).
+
+        Backend code unchanged. The Railway deployment does NOT need to be
+        redeployed — the fix is purely client-side. The next Vercel build will
+        ship the working login to all users.

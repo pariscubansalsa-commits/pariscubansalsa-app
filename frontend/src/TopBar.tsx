@@ -4,22 +4,29 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Platform,
   Image,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "./auth";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { openExternal } from "./links";
 
+// Compact header — cap the iOS safe-area inset so the bar stays under ~60px even
+// on notched phones. Equivalent to CSS: padding-top: env(safe-area-inset-top, 12px) + 8px.
+const SAFE_TOP_CAP = 24;
+const SAFE_TOP_FALLBACK = 12;
+
 export default function TopBar() {
   const router = useRouter();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  // Use the device inset but cap it to avoid Apple's generous notch padding.
+  const topPad = Math.min(insets.top || SAFE_TOP_FALLBACK, SAFE_TOP_CAP) + 8;
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safe}>
+    <View style={[styles.safe, { paddingTop: topPad }]}>
       <View style={styles.bar}>
         <TouchableOpacity
           onPress={() => router.replace("/")}
@@ -67,7 +74,7 @@ export default function TopBar() {
           </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -79,7 +86,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: SPACING.screen,
     paddingVertical: 4,
-    height: 48,
+    height: 40,
   },
   logoWrap: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: {

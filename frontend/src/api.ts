@@ -118,7 +118,6 @@ export const api = {
     fetch(`${API}/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EventItem>(r)),
 
@@ -126,14 +125,12 @@ export const api = {
     fetch(`${API}/events/${id}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   uploadPhotos: (token: string, id: string, photos: string[]) =>
     fetch(`${API}/events/${id}/photos`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify({ photos }),
     }).then((r) => handle<{ inserted: number }>(r)),
 
@@ -141,7 +138,6 @@ export const api = {
     fetch(`${API}/photos/${id}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   addTag: (photoId: string, label: string) =>
@@ -174,14 +170,12 @@ export const api = {
     fetch(`${API}/entries/${id}/feature`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem>(r)),
 
   unfeatureEntry: (token: string, id: string) =>
     fetch(`${API}/entries/${id}/unfeature`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem>(r)),
 
   submitEntry: (body: {
@@ -215,13 +209,11 @@ export const api = {
 
   listPendingEntries: (token: string) =>
     fetch(`${API}/entries?status=pending`, {
-      credentials: "include",
       headers: authHeaders(token),
     }).then((r) => handle<EntryItem[]>(r)),
 
   listRejectedEntries: (token: string) =>
     fetch(`${API}/entries?status=rejected`, {
-      credentials: "include",
       headers: authHeaders(token),
     }).then((r) => handle<EntryItem[]>(r)),
 
@@ -230,7 +222,6 @@ export const api = {
     return fetch(`${API}/entries/${id}/approve${qs}`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem>(r));
   },
 
@@ -238,19 +229,16 @@ export const api = {
     fetch(`${API}/entries/${id}/reject`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<{ ok: boolean; id: string; status: string }>(r)),
 
   duplicateEntry: (token: string, id: string) =>
     fetch(`${API}/entries/${id}/duplicate`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem>(r)),
 
   listPastEntries: (token: string) =>
     fetch(`${API}/entries?include_past=true`, {
-      credentials: "include",
       headers: authHeaders(token),
     }).then((r) => handle<EntryItem[]>(r)),
 
@@ -258,7 +246,6 @@ export const api = {
     fetch(`${API}/calendar/sync`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) =>
       handle<{
         ok: boolean;
@@ -274,21 +261,18 @@ export const api = {
     fetch(`${API}/entries`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
   updateEntry: (token: string, id: string, body: Partial<EntryItem>, scope: "this" | "future" | "all" = "this") =>
     fetch(`${API}/entries/${id}?scope=${scope}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
   deleteEntry: (token: string, id: string, scope: "this" | "future" | "all" = "this") =>
     fetch(`${API}/entries/${id}?scope=${scope}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   /**
@@ -318,7 +302,6 @@ export const api = {
     fetch(`${API}/entries/${id}/duplicate-next`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(overrides),
     }).then((r) => handle<EntryItem>(r)),
 
@@ -339,20 +322,17 @@ export const api = {
     fetch(`${API}/entries/${entryId}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify({ items }),
     }).then((r) => handle<EntryMediaItem[]>(r)),
   deleteEntryMedia: (token: string, mediaId: string) =>
     fetch(`${API}/media/${mediaId}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<{ ok: boolean; id: string }>(r)),
   reorderEntryMedia: (token: string, entryId: string, ids: string[]) =>
     fetch(`${API}/entries/${entryId}/media/order`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify({ ids }),
     }).then((r) => handle<{ ok: boolean; count: number }>(r)),
   listPastFestivalsWithGallery: () =>
@@ -363,21 +343,18 @@ export const api = {
     fetch(`${API}/teachers`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<TeacherItem>(r)),
   updateTeacher: (token: string, id: string, body: Partial<TeacherItem>) =>
     fetch(`${API}/teachers/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<TeacherItem>(r)),
   deleteTeacher: (token: string, id: string) =>
     fetch(`${API}/teachers/${id}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   // Auth
@@ -385,28 +362,31 @@ export const api = {
     fetch(`${API}/auth/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ session_id: sessionId }),
     }).then((r) => handle<any>(r)),
 
   passwordLogin: (email: string, password: string) =>
+    // NOTE: we intentionally OMIT `credentials: "include"` here. The backend
+    // returns `session_token` in the body and the frontend stores it in
+    // localStorage. We rely on Bearer tokens for all subsequent requests, NOT
+    // on cookies. This sidesteps Safari iOS' strict CORS rule that rejects
+    // any cross-origin response combining `Allow-Origin: *` with
+    // `Allow-Credentials: true`, which was the root cause of "Load failed"
+    // on installed PWAs.
     fetch(`${API}/auth/password-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ email, password }),
     }).then((r) => handle<any>(r)),
 
   authMe: (token?: string) =>
     fetch(`${API}/auth/me`, {
-      credentials: "include",
       headers: authHeaders(token),
     }).then((r) => (r.ok ? r.json() : null)),
 
   logout: (token?: string) =>
     fetch(`${API}/auth/logout`, {
       method: "POST",
-      credentials: "include",
       headers: authHeaders(token),
     }),
 
@@ -423,7 +403,6 @@ export const api = {
     fetch(`${API}/auth/signup/organisateur`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<any>(r)),
 
@@ -438,7 +417,6 @@ export const api = {
     fetch(`${API}/auth/signup/artiste`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<any>(r)),
 
@@ -446,14 +424,12 @@ export const api = {
   organisateurEntries: (token: string) =>
     fetch(`${API}/organisateur/entries`, {
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem[]>(r)),
 
   organisateurCreateEntry: (token: string, body: Partial<EntryItem>) =>
     fetch(`${API}/organisateur/entries`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
 
@@ -461,7 +437,6 @@ export const api = {
     fetch(`${API}/organisateur/entries/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
 
@@ -469,35 +444,30 @@ export const api = {
     fetch(`${API}/organisateur/entries/${id}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   // Artiste — own profile + workshops
   artisteProfile: (token: string) =>
     fetch(`${API}/artiste/profile`, {
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<TeacherItem>(r)),
 
   artisteUpdateProfile: (token: string, body: Partial<TeacherItem>) =>
     fetch(`${API}/artiste/profile`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<TeacherItem>(r)),
 
   artisteWorkshops: (token: string) =>
     fetch(`${API}/artiste/workshops`, {
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<EntryItem[]>(r)),
 
   artisteCreateWorkshop: (token: string, body: Partial<EntryItem>) =>
     fetch(`${API}/artiste/workshops`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
 
@@ -505,7 +475,6 @@ export const api = {
     fetch(`${API}/artiste/workshops/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<EntryItem>(r)),
 
@@ -513,7 +482,6 @@ export const api = {
     fetch(`${API}/artiste/workshops/${id}`, {
       method: "DELETE",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   // Admin — manage users
@@ -524,7 +492,6 @@ export const api = {
     const q = qs.toString();
     return fetch(`${API}/admin/users${q ? `?${q}` : ""}`, {
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any[]>(r));
   },
 
@@ -532,28 +499,24 @@ export const api = {
     fetch(`${API}/admin/users/${userId}/approve-organizer`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   adminSuspendUser: (token: string, userId: string) =>
     fetch(`${API}/admin/users/${userId}/suspend`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   adminReactivateUser: (token: string, userId: string) =>
     fetch(`${API}/admin/users/${userId}/reactivate`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 
   adminApproveArtist: (token: string, userId: string, body: { teacher_id?: string }) =>
     fetch(`${API}/admin/users/${userId}/approve-artist`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      credentials: "include",
       body: JSON.stringify(body),
     }).then((r) => handle<any>(r)),
 
@@ -561,6 +524,5 @@ export const api = {
     fetch(`${API}/admin/users/${userId}/reject-artist`, {
       method: "POST",
       headers: authHeaders(token),
-      credentials: "include",
     }).then((r) => handle<any>(r)),
 };
