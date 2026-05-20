@@ -129,6 +129,7 @@ class Entry(BaseModel):
     end_time: Optional[str] = ""
     venue: Optional[str] = ""
     address: Optional[str] = ""
+    country: Optional[str] = ""  # ISO country name — used mostly for festivals
     description: Optional[str] = ""
     instructor: Optional[str] = ""
     teacher_id: Optional[str] = None
@@ -1062,6 +1063,100 @@ async def create_entry(payload: EntryCreate, _user: User = Depends(require_admin
         created = await generate_occurrences(doc)
         logger.info("Created %s occurrences for master %s", created, doc["id"])
     return entry
+
+
+# ============ Bulk import — festivals (admin only) ============
+
+DANCE_STYLE_ALIASES = {
+    "cubaine": "salsa_cubaine",
+    "salsa_cubaine": "salsa_cubaine",
+    "salsa cubaine": "salsa_cubaine",
+    "multi": "multi_styles",
+    "multi_styles": "multi_styles",
+    "on2": "on2",
+    "autre": "autre",
+}
+
+
+class FestivalImportItem(BaseModel):
+    title: str
+    date: str
+    end_date: Optional[str] = None
+    location: Optional[str] = ""
+    address: Optional[str] = ""
+    country: Optional[str] = ""
+    link: Optional[str] = ""
+    dance_style: Optional[str] = "cubaine"
+    description: Optional[str] = ""
+
+
+@api_router.post("/admin/festivals/import")
+async def import_festivals_bulk(
+    payload: List[FestivalImportItem],
+    _user: User = Depends(require_admin),
+):
+    """Bulk-create festival entries from a JSON array. Idempotent — entries
+    matching an existing (title, date) are skipped. Used to seed the catalog
+    from external scrapes (PCS festival list)."""
+
+    created: list = []
+    skipped: list = []
+    errors: list = []
+
+    for item in payload:
+        try:
+            title = (item.title or "").strip()
+            date = (item.date or "").strip().replace("/", "-")[:10]
+            if not title or not date:
+                errors.append({"title": item.title, "reason": "title or date missing"})
+                continue
+
+            # Dedupe by (title, date) — case-insensitive title match
+            existing = await db.entries.find_one(
+                {
+                    "type": "festival",
+                    "date": date,
+                    "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
+                },
+                {"_id": 0, "id": 1, "title": 1, "date": 1},
+            )
+            if existing:
+                skipped.append({"id": existing["id"], "title": title, "date": date})
+                continue
+
+            ds_raw = (item.dance_style or "cubaine").strip().lower()
+            ds = DANCE_STYLE_ALIASES.get(ds_raw, DEFAULT_DANCE_STYLE)
+
+            entry = Entry(
+                type="festival",
+                title=title,
+                date=date,
+                end_date=(item.end_date or "").strip().replace("/", "-")[:10] or None,
+                venue=(item.location or "").strip(),
+                address=(item.address or "").strip(),
+                country=(item.country or "").strip(),
+                ticket_link=(item.link or "").strip(),
+                description=(item.description or "").strip(),
+                dance_style=ds,
+                status="approved",
+                featured=False,
+                source="pcs-scrape-v1",
+            )
+            await db.entries.insert_one(entry.dict())
+            created.append({"id": entry.id, "title": title, "date": date})
+        except Exception as e:
+            errors.append({"title": getattr(item, "title", "?"), "reason": str(e)})
+
+    return {
+        "ok": True,
+        "submitted": len(payload),
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 @api_router.post("/entries/{entry_id}/regenerate-occurrences")

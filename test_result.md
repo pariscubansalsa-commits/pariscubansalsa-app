@@ -1816,4 +1816,48 @@ agent_communication:
         - Scroll-to-bottom screenshot: last card "SALSAFRESNES, Baíla Con
           Cuba afuera" appears directly above the dark nav with only a
           tiny visible gap. ✔
+    - agent: "main"
+      message: |
+        ## NEW FEATURE — Bulk festival import endpoint
+
+        ### Endpoint added
+        `POST /api/admin/festivals/import` — admin-only (Bearer required).
+        Accepts a JSON array of festival items. Returns:
+        `{ok, submitted, created_count, skipped_count, error_count,
+          created[], skipped[], errors[]}`.
+
+        ### Item schema (FestivalImportItem)
+        ```
+        {title, date, end_date, location, address, country, link, dance_style}
+        ```
+        - `dance_style` accepts shorthand "cubaine" / "multi" / "on2" / "autre",
+          normalized via DANCE_STYLE_ALIASES → "salsa_cubaine" / "multi_styles" /
+          "on2" / "autre".
+        - `location` mapped to `venue`, `link` to `ticket_link`.
+        - Dates auto-normalize `/` → `-` and clip to 10 chars.
+
+        ### Stored fields per festival
+        - `type: "festival"`, `status: "approved"`, `source: "pcs-scrape-v1"`
+        - New `country` field added to the Entry model.
+
+        ### Dedup logic
+        Existing entry with same `type=festival` AND same `date` AND
+        case-insensitive title match → skipped (idempotent).
+
+        ### Verified in local env
+        - First import of 68 entries: 68 created, 0 skipped, 0 errors.
+        - Re-import of same 68: 0 created, 68 skipped (idempotency OK).
+        - GET /api/entries?type=festival returns all 68 + the 2 pre-existing
+          festivals, with `country` populated. Past entries (e.g., the 14
+          May festivals when today=20 May) are auto-filtered by the public
+          listing rule.
+        - GET /api/entries?type=festival&dance_style=multi_styles returns
+          9 entries (Croatian Summer, All Salsa, Miami, Tempo Latino, etc.)
+        - Frontend `/festivals` page displays "68 FESTIVALS" count badge.
+
+        ### NOTE for production
+        The user provided 68 items (announced as "69" but the JSON contains
+        68 — could be a typo). The endpoint is generic and accepts any size.
+        For prod deployment: redeploy backend to Railway, then `curl` the
+        endpoint with admin Bearer token to seed prod.
         correctly everywhere.
