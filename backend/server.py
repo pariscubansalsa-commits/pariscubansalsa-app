@@ -866,10 +866,28 @@ async def list_entries(
 
     items = await db.entries.find(query, {"_id": 0}).to_list(2000)
 
-    # Sort: featured first, then by date asc
+    # Defensive: filter out entries whose date (or end_date) has actually
+    # passed, even if they were stored with legacy slash-separated dates
+    # ("2026/05/23") that bypassed the Mongo $gte string comparison.
+    today_iso = today_paris_str()
+
+    def _norm_date(s: Optional[str]) -> str:
+        if not s:
+            return ""
+        return s.strip().replace("/", "-")[:10]
+
+    if not (user_admin and (include_past or status)):
+        items = [
+            e
+            for e in items
+            if (_norm_date(e.get("end_date")) or _norm_date(e.get("date"))) >= today_iso
+        ]
+
+    # Sort: featured first, then by date asc (normalized so "2026/05/23"
+    # is compared as "2026-05-23" and not as a separate alphabetical bucket).
     def sort_key(e):
         priority = 0 if e.get("status") == "featured" else 1
-        return (priority, e.get("date") or "")
+        return (priority, _norm_date(e.get("date")), e.get("time") or "")
     items.sort(key=sort_key)
 
     return [Entry(**e) for e in items]

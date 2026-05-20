@@ -22,6 +22,26 @@ const CARD_H = CARD_W * 1.25;
 
 const openLink = (url: string) => openExternal(url);
 
+/**
+ * Normalize a date string to ISO format YYYY-MM-DD so lexicographic comparison
+ * works correctly. Some legacy entries were stored as "2026/05/23" with
+ * slashes — that sorts AFTER "2026-07-07" because '/' (0x2F) > '-' (0x2D)
+ * in ASCII, which broke the carousel order.
+ */
+function normalizeDate(s?: string | null): string {
+  if (!s) return "";
+  return s.trim().replace(/\//g, "-").slice(0, 10);
+}
+
+/** Today as YYYY-MM-DD in the user's local timezone. */
+function todayISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function FeaturedCarousel() {
   const router = useRouter();
   const [items, setItems] = useState<EntryItem[]>([]);
@@ -31,7 +51,22 @@ export default function FeaturedCarousel() {
     (async () => {
       try {
         const data = await api.listFeatured();
-        setItems(data);
+        const today = todayISO();
+        // Hide entries whose date (or end_date for multi-day events) has
+        // already passed, and sort chronologically — soonest first.
+        const upcoming = data
+          .filter((it) => {
+            const end = normalizeDate(it.end_date);
+            const start = normalizeDate(it.date);
+            const ref = end || start;
+            return ref >= today;
+          })
+          .sort(
+            (a, b) =>
+              normalizeDate(a.date).localeCompare(normalizeDate(b.date)) ||
+              (a.time || "").localeCompare(b.time || "")
+          );
+        setItems(upcoming);
       } catch {}
       finally {
         setLoading(false);

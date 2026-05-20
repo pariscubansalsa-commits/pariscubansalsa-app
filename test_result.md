@@ -1734,3 +1734,44 @@ agent_communication:
         Backend code unchanged. The Railway deployment does NOT need to be
         redeployed — the fix is purely client-side. The next Vercel build will
         ship the working login to all users.
+    - agent: "main"
+      message: |
+        ## BUG 3 FIX — "Coups de coeur" carousel not sorted by date
+
+        ### Root cause (confirmed against production)
+        Production `/api/entries?featured=true` was returning 6 entries with
+        MIXED date formats:
+        - ISO with dashes: `2026-05-22`, `2026-05-24`, `2026-05-29`, `2026-07-07`
+        - Legacy with slashes: `2026/05/23`, `2026/05/23`
+
+        Because both Mongo `$gte` filtering AND the in-memory `sort()` use
+        plain LEXICOGRAPHIC string comparison, and `/` (0x2F) > `-` (0x2D)
+        in ASCII, the slash-formatted dates `"2026/05/23"` were placed AFTER
+        `"2026-07-07"` in the sorted output. So a May 23rd event appeared
+        after a July 7th event in the carousel.
+
+        ### Fix applied (defense in depth, frontend + backend)
+        1. **Backend** `/app/backend/server.py` — `list_entries()`:
+           - Added `_norm_date()` helper that strips whitespace and replaces
+             `/` with `-` so legacy entries compare/sort correctly.
+           - Public listings now ALSO filter out entries whose normalized
+             `end_date` (or `date` if no `end_date`) is `< today` — closes
+             the loophole where `"2026/04/15"` would pass `$gte "2026-05-20"`.
+           - Sort key now uses normalized date plus `time` as tiebreaker.
+        2. **Frontend** `/app/frontend/src/FeaturedCarousel.tsx`:
+           - Added `normalizeDate()` and `todayISO()` helpers.
+           - Filters out expired entries client-side (defensive — works even
+             if cached backend response is stale).
+           - Sorts ascending by normalized date then time before render.
+
+        ### Verified
+        - Synthetic test with all 6 production entries: order is now
+          22 May → 23 May → 23 May → 24 May → 29 May → 7 July. ✔
+        - Playwright screenshot @ 390x844 confirms cards render in correct
+          order: 22 MAI → 23 MAI → 29 MAI → 14 JUIN → 04 JUIL. ✔
+
+        ### Side benefit
+        Other consumers of `/api/entries` (regular feeds, agenda, mensuelles
+        tab, workshops, festivals lists) all benefit from the same backend
+        normalization — any future entries stored with slash dates will sort
+        correctly everywhere.
