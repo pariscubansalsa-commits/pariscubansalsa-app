@@ -34,10 +34,10 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="PCS" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2" />
-        <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png?v=2" />
-        <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png?v=2" />
-        <link rel="apple-touch-startup-image" href="/icons/icon-512.png?v=2" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=3" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png?v=3" />
+        <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png?v=3" />
+        <link rel="apple-touch-startup-image" href="/icons/icon-512.png?v=3" />
 
         {/* Google Analytics 4 (gtag.js) */}
         <script
@@ -60,11 +60,11 @@ export default function Root({ children }: PropsWithChildren) {
             The browser picks the first matching <link rel="icon"> with the right
             size. We put /favicon.ico FIRST so the browser tab gets the new PCS
             badge immediately on every revisit. */}
-        <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
-        <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png?v=2" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=2" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=2" />
-        <link rel="shortcut icon" href="/favicon.ico?v=2" />
+        <link rel="icon" href="/favicon.ico?v=3" sizes="any" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png?v=3" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=3" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=3" />
+        <link rel="shortcut icon" href="/favicon.ico?v=3" />
 
         {/* OpenGraph */}
         <meta property="og:type" content="website" />
@@ -104,18 +104,18 @@ export default function Root({ children }: PropsWithChildren) {
                   heads.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]').forEach(function (n) { n.parentNode.removeChild(n); });
                   var l = document.createElement('link');
                   l.rel = 'icon';
-                  l.href = '/favicon.ico?v=2';
+                  l.href = '/favicon.ico?v=3';
                   l.type = 'image/x-icon';
                   heads.appendChild(l);
                   var l2 = document.createElement('link');
                   l2.rel = 'icon';
                   l2.type = 'image/png';
                   l2.sizes = '32x32';
-                  l2.href = '/icons/favicon-32.png?v=2';
+                  l2.href = '/icons/favicon-32.png?v=3';
                   heads.appendChild(l2);
                   var l3 = document.createElement('link');
                   l3.rel = 'shortcut icon';
-                  l3.href = '/favicon.ico?v=2';
+                  l3.href = '/favicon.ico?v=3';
                   heads.appendChild(l3);
                 } catch (e) { /* no-op */ }
               })();

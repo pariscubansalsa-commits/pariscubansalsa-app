@@ -9,7 +9,7 @@
  * to the browser's default behavior.
  */
 
-const CACHE_VERSION = "pcs-v2.2.0";
+const CACHE_VERSION = "pcs-v2.3.0";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 
 const PRECACHE_ASSETS = [
