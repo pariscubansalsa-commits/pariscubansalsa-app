@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, EntryMediaItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { confirmAction, notify } from "./dialog";
@@ -41,6 +42,7 @@ export default function AdminGalleryManager({
   token: string;
   onChanged?: () => void;
 }) {
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<EntryMediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [videoUrl, setVideoUrl] = useState("");
@@ -160,9 +162,14 @@ export default function AdminGalleryManager({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.safe}>
-        <View style={styles.topBar}>
+        <View style={[styles.topBar, { paddingTop: Math.max(insets.top + 8, 14) }]}>
           <Text style={styles.topTitle}>GÉRER LA GALERIE</Text>
-          <TouchableOpacity onPress={onClose} testID="admin-gallery-close">
+          <TouchableOpacity
+            onPress={onClose}
+            testID="admin-gallery-close"
+            hitSlop={12}
+            style={styles.closeBtn}
+          >
             <Ionicons name="close" size={24} color={COLORS.primaryText} />
           </TouchableOpacity>
         </View>
@@ -293,10 +300,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: SPACING.screen,
-    paddingTop: Platform.OS === "ios" ? 50 : 14,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.04)",
   },
   topTitle: {
     fontFamily: FONTS.bodyBold,

@@ -13,7 +13,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -64,6 +64,7 @@ const TYPE_OPTIONS: { v: EntryType; l: string }[] = [
 ];
 
 export default function EntryDetail() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user, token } = useAuth();
@@ -495,10 +496,15 @@ export default function EntryDetail() {
             contentContainerStyle={styles.editSheetWrap}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={styles.editSheet}>
+            <View style={[styles.editSheet, { paddingTop: Math.max(insets.top + 12, 20) }]}>
               <View style={styles.editHeader}>
                 <Text style={styles.editTitle}>Modifier l&apos;event</Text>
-                <TouchableOpacity onPress={() => setEditOpen(false)}>
+                <TouchableOpacity
+                  onPress={() => setEditOpen(false)}
+                  testID="close-edit-modal"
+                  hitSlop={12}
+                  style={styles.editCloseBtn}
+                >
                   <Ionicons name="close" size={22} color={COLORS.primaryText} />
                 </TouchableOpacity>
               </View>
@@ -949,10 +955,18 @@ const styles = StyleSheet.create({
   editSheetWrap: { flexGrow: 1, justifyContent: "flex-end" },
   editSheet: {
     backgroundColor: "#fff",
-    padding: SPACING.screen,
+    paddingHorizontal: SPACING.screen,
     paddingBottom: Platform.OS === "ios" ? 40 : 24,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+  },
+  editCloseBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.04)",
   },
   editHeader: {
     flexDirection: "row",

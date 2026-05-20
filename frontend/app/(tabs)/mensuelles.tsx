@@ -381,7 +381,7 @@ function ReadonlyRow({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  hero: { paddingTop: 20, paddingBottom: 18 },
+  hero: { paddingTop: 12, paddingBottom: 18 },
   overline: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,

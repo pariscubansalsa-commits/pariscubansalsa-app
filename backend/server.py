@@ -2497,12 +2497,42 @@ async def admin_notify_test(_user: User = Depends(require_admin)):
 app.include_router(api_router)
 
 
+# --- CORS configuration ---
+# Safari iOS REJECTS `Access-Control-Allow-Origin: *` when the request is
+# credentialed (`credentials: 'include'`) and reports a generic "Load failed".
+# We therefore use an explicit allowlist + a regex for ephemeral preview URLs,
+# so Starlette echoes back the *exact* requesting Origin (CORS spec compliant).
+_extra_origins = [
+    o.strip()
+    for o in (os.getenv("CORS_ALLOWED_ORIGINS") or "").split(",")
+    if o.strip()
+]
+CORS_ALLOWED_ORIGINS = list({
+    # Production
+    "https://pariscubansalsa.com",
+    "https://www.pariscubansalsa.com",
+    # Dev / Expo
+    "http://localhost:3000",
+    "http://localhost:8081",
+    "http://localhost:19006",
+    "http://127.0.0.1:3000",
+    *_extra_origins,
+})
+# Regex covers Emergent preview tunnels and Vercel deploy previews / branch deploys.
+CORS_ALLOWED_ORIGIN_REGEX = (
+    r"^https://([a-z0-9-]+\.)*"
+    r"(preview\.emergentagent\.com|emergent\.host|vercel\.app|pariscubansalsa\.com)$"
+)
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, EntryMediaItem } from "./api";
 import { COLORS, FONTS } from "./theme";
 import { openExternal } from "./links";
@@ -64,6 +65,7 @@ export default function EntryGallery({
   /** Bumped by the parent after an admin upload to force a refresh */
   reloadKey?: number;
 }) {
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<EntryMediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
@@ -141,7 +143,7 @@ export default function EntryGallery({
         animationType="fade"
         onRequestClose={closeLightbox}
       >
-        <View style={styles.lightboxBackdrop}>
+        <View style={[styles.lightboxBackdrop, { paddingTop: Math.max(insets.top + 8, 16) }]}>
           <View style={styles.lightboxTopBar}>
             <Text style={styles.lightboxCount}>
               {openIdx !== null ? `${openIdx + 1} / ${items.length}` : ""}
@@ -311,7 +313,6 @@ const styles = StyleSheet.create({
   lightboxBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.96)",
-    paddingTop: Platform.OS === "ios" ? 40 : 16,
   },
   lightboxTopBar: {
     flexDirection: "row",

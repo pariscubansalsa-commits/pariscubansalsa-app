@@ -12,6 +12,7 @@ import {
 
   Image,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { confirmAction, notify } from "./dialog";
 import { Ionicons } from "@expo/vector-icons";
 import { api, TeacherItem } from "./api";
@@ -67,6 +68,7 @@ export default function SubmitEntryButton({
   customLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const insets = useSafeAreaInsets();
   const [currentType, setCurrentType] = useState<EntryTypeSubmit>(type);
   const [form, setForm] = useState({ ...EMPTY, teacher_id: presetTeacherId || "" });
   const [danceStyle, setDanceStyle] = useState<DanceStyle>("multi_styles");
@@ -186,12 +188,17 @@ export default function SubmitEntryButton({
             contentContainerStyle={styles.sheetWrap}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={styles.sheet}>
+            <View style={[styles.sheet, { paddingTop: Math.max(insets.top + 12, 20) }]}>
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>
                   {success ? "Merci !" : `Proposer ${titleNoun[currentType]}`}
                 </Text>
-                <TouchableOpacity testID="close-submit-modal" onPress={() => setOpen(false)}>
+                <TouchableOpacity
+                  testID="close-submit-modal"
+                  onPress={() => setOpen(false)}
+                  hitSlop={12}
+                  style={styles.closeBtn}
+                >
                   <Ionicons name="close" size={22} color={COLORS.primaryText} />
                 </TouchableOpacity>
               </View>
@@ -604,10 +611,18 @@ const styles = StyleSheet.create({
   sheetWrap: { flexGrow: 1, justifyContent: "flex-end" },
   sheet: {
     backgroundColor: "#fff",
-    padding: SPACING.screen,
+    paddingHorizontal: SPACING.screen,
     paddingBottom: Platform.OS === "ios" ? 40 : 24,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.04)",
   },
   sheetHeader: {
     flexDirection: "row",
