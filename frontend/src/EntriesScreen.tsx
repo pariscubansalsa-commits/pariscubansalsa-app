@@ -91,7 +91,7 @@ export default function EntriesScreen({
         renderItem={({ item }) => (
           <EntryCard entry={item} onPress={() => openDetail(item.id)} />
         )}
-        contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: SPACING.screen }}
+        contentContainerStyle={{ paddingBottom: 12, paddingHorizontal: SPACING.screen }}
         ListHeaderComponent={
           <>
             {showFeatured && <FeaturedCarousel />}

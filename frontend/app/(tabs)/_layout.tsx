@@ -1,17 +1,29 @@
 import React from "react";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Platform, View, StyleSheet } from "react-native";
+import { View, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, FONTS } from "../../src/theme";
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+  // Extend the tab bar into the safe-area-bottom so the dark background
+  // reaches the screen edge on PWA on iPhone (no white gap under the bar).
+  // Cap the inset at 24px so on tall home-indicator devices the bar doesn't
+  // grow excessively.
+  const bottomInset = Math.min(insets.bottom || 0, 24);
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: COLORS.accentYellow,
         tabBarInactiveTintColor: "rgba(255,255,255,0.55)",
-        tabBarStyle: styles.bar,
+        tabBarStyle: {
+          ...styles.bar,
+          height: 56 + bottomInset,
+          paddingBottom: bottomInset + 6,
+        },
         tabBarItemStyle: styles.item,
         tabBarLabelStyle: {
           fontFamily: FONTS.bodyBold,
@@ -93,9 +105,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#1A1A1A",
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.08)",
-    height: Platform.OS === "ios" ? 84 : 68,
     paddingTop: 8,
-    paddingBottom: Platform.OS === "ios" ? 22 : 10,
   },
   item: { paddingVertical: 2 },
   iconWrap: { alignItems: "center", justifyContent: "center" },

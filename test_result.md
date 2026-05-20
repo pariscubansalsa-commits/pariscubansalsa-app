@@ -1774,4 +1774,46 @@ agent_communication:
         Other consumers of `/api/entries` (regular feeds, agenda, mensuelles
         tab, workshops, festivals lists) all benefit from the same backend
         normalization — any future entries stored with slash dates will sort
+    - agent: "main"
+      message: |
+        ## QUICK FIX — 2 mobile spacing issues
+
+        ### 1) Header items not vertically centered
+        On iPhone PWA the `safe-area-inset-top` is ~47px (status bar + notch).
+        Previously the topPad was capped at min(47, 24) + 8 = 32px, plus a
+        40px bar with items aligned center inside it. Items ended up at
+        y=32..72 within an apparent 72px black band, so visually they sat
+        in the bottom half (user perception: "trop bas").
+
+        Fix in /app/frontend/src/TopBar.tsx:
+        - Reduced cap from 24 → 16, fallback 12 → 8, offset 8 → 4. New
+          topPad = Math.min(insets.top, 16) + 4.
+        - Added paddingBottom: 4 on the outer container for visual balance.
+        - Net result on iPhone PWA: ~20px of safe area + 40px bar + 4px
+          breathing room = 64px total, items vertically centered.
+
+        ### 2) White bar between content and bottom nav
+        Two compounding issues fixed:
+
+        a) Tab bar didn't extend into `safe-area-inset-bottom`. On iPhone
+           PWA the bar was a fixed 84px high but ended ABOVE the home
+           indicator zone, exposing the white body underneath.
+           Fix in /app/frontend/app/(tabs)/_layout.tsx:
+           - Use `useSafeAreaInsets()` to compute bottomInset (capped 24px).
+           - Tab bar `height: 56 + bottomInset`, `paddingBottom: bottomInset + 6`.
+           - Dark `#1A1A1A` background now reaches the screen edge.
+
+        b) FlatList contentContainer had `paddingBottom: 40` rendering as a
+           40px white band above the tab bar between the last card and the
+           dark nav.
+           Fix in /app/frontend/src/EntriesScreen.tsx:
+           - Reduced to `paddingBottom: 12` — last card now sits ~12px
+             above the tab bar (clean, small breathing room).
+
+        ### Verified
+        - Playwright @ 390x844 desktop simulation: header h=56, bottom nav
+          h=56, bottom nav rect ends exactly at viewport bottom (y=844). ✔
+        - Scroll-to-bottom screenshot: last card "SALSAFRESNES, Baíla Con
+          Cuba afuera" appears directly above the dark nav with only a
+          tiny visible gap. ✔
         correctly everywhere.

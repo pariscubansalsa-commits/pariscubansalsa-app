@@ -13,20 +13,22 @@ import { useAuth } from "./auth";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { openExternal } from "./links";
 
-// Compact header — cap the iOS safe-area inset so the bar stays under ~60px even
-// on notched phones. Equivalent to CSS: padding-top: env(safe-area-inset-top, 12px) + 8px.
-const SAFE_TOP_CAP = 24;
-const SAFE_TOP_FALLBACK = 12;
+// Compact header — respect the notch but cap aggressively, and add a tiny
+// bottom padding so the items appear visually centered in the black band.
+// Equivalent CSS: padding-top: min(env(safe-area-inset-top), 16px) + 4px;
+//                 padding-bottom: 4px;
+const SAFE_TOP_CAP = 16;
+const SAFE_TOP_FALLBACK = 8;
 
 export default function TopBar() {
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   // Use the device inset but cap it to avoid Apple's generous notch padding.
-  const topPad = Math.min(insets.top || SAFE_TOP_FALLBACK, SAFE_TOP_CAP) + 8;
+  const topPad = Math.min(insets.top || SAFE_TOP_FALLBACK, SAFE_TOP_CAP) + 4;
 
   return (
-    <View style={[styles.safe, { paddingTop: topPad }]}>
+    <View style={[styles.safe, { paddingTop: topPad, paddingBottom: 4 }]}>
       <View style={styles.bar}>
         <TouchableOpacity
           onPress={() => router.replace("/")}
