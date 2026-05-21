@@ -207,6 +207,246 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
       : formatDate(entry.date)
     : "";
 
+  // ─── WEB RENDERING ─────────────────────────────────────────────────────
+  // We bypass React Native's StyleSheet entirely for the iframe + overlay
+  // stacking so CSS properties like `isolation` and explicit `z-index`
+  // reach the DOM. This guarantees the overlay sits ABOVE YouTube /
+  // Instagram / TikTok iframes on every browser, mobile included.
+  if (Platform.OS === "web") {
+    const ctaLink = highlight.cta_link || entry?.ticket_link;
+    return (
+      // @ts-ignore — raw web rendering
+      <div
+        ref={containerRef as any}
+        data-testid={`highlight-card-${highlight.id}`}
+        onClick={onCardPress as any}
+        style={{
+          width: CARD_W,
+          height: CARD_H,
+          borderRadius: 14,
+          overflow: "hidden",
+          backgroundColor: "#111",
+          position: "relative",
+          flexShrink: 0,
+          isolation: "isolate",
+          cursor: "pointer",
+          WebkitTapHighlightColor: "transparent",
+        }}
+      >
+        {/* Media layer — z-index 0 */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            backgroundColor: "#111",
+          }}
+        >
+          {embedUrl ? (
+            <iframe
+              src={embedUrl}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                pointerEvents: "none",
+                display: "block",
+              }}
+              allow="autoplay; encrypted-media; picture-in-picture"
+              loading="lazy"
+            />
+          ) : directVideoSrc ? (
+            <video
+              ref={videoRef as any}
+              src={directVideoSrc}
+              muted={muted}
+              autoPlay
+              loop
+              playsInline
+              preload="metadata"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          ) : entry?.cover_photo ? (
+            <img
+              src={entry.cover_photo}
+              loading="lazy"
+              decoding="async"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+              alt=""
+            />
+          ) : (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "#111",
+                color: COLORS.accentYellow,
+                fontFamily: FONTS.heading,
+                fontSize: 52,
+              }}
+            >
+              PCS
+            </div>
+          )}
+        </div>
+
+        {/* Partner badge — z-index 3 */}
+        {highlight.is_sponsored && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              zIndex: 3,
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+              backgroundColor: COLORS.accentYellow,
+              padding: "3px 6px",
+              borderRadius: 40,
+              pointerEvents: "none",
+            }}
+          >
+            <Ionicons name="heart" size={10} color={COLORS.primaryText} />
+            <span
+              style={{
+                fontFamily: FONTS.bodyBold,
+                fontSize: 8,
+                letterSpacing: 0.9,
+                color: COLORS.primaryText,
+              }}
+            >
+              PARTENAIRE
+            </span>
+          </div>
+        )}
+
+        {/* Mute toggle — z-index 3 */}
+        {!embedUrl && directVideoSrc && (
+          <div
+            onClick={toggleMute as any}
+            data-testid={`highlight-mute-${highlight.id}`}
+            style={{
+              position: "absolute",
+              top: 10,
+              left: 10,
+              zIndex: 3,
+              width: 26,
+              height: 26,
+              borderRadius: 13,
+              backgroundColor: "rgba(0,0,0,0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <Ionicons
+              name={muted ? "volume-mute" : "volume-high"}
+              size={14}
+              color="#fff"
+            />
+          </div>
+        )}
+
+        {/* Bottom overlay — z-index 10 (guaranteed above iframes) */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            padding: 12,
+            paddingTop: 22,
+            backgroundImage:
+              "linear-gradient(to top, rgba(0,0,0,0.92) 60%, rgba(0,0,0,0.2) 100%)",
+          }}
+        >
+          <div style={{ marginBottom: 8 }}>
+            <div
+              style={{
+                fontFamily: FONTS.heading,
+                fontSize: 16,
+                lineHeight: "19px",
+                color: "#fff",
+                letterSpacing: -0.2,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }}
+            >
+              {entry?.title || "Sans titre"}
+            </div>
+            {!!dateLabel && (
+              <div
+                style={{
+                  fontFamily: FONTS.bodyBold,
+                  fontSize: 9,
+                  letterSpacing: 0.9,
+                  color: "rgba(255,255,255,0.85)",
+                  marginTop: 4,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {dateLabel}
+                {entry?.venue ? ` · ${entry.venue}` : ""}
+              </div>
+            )}
+          </div>
+          {ctaLink && (
+            <div
+              onClick={onCtaPress as any}
+              data-testid={`highlight-cta-${highlight.id}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                backgroundColor: COLORS.accentYellow,
+                padding: "7px 10px",
+                borderRadius: 40,
+                cursor: "pointer",
+              }}
+            >
+              <Ionicons name="ticket" size={12} color={COLORS.primaryText} />
+              <span
+                style={{
+                  fontFamily: FONTS.bodyBold,
+                  fontSize: 10,
+                  letterSpacing: 1.1,
+                  color: COLORS.primaryText,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {highlight.cta_text || "ACHETER LE TICKET"}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── NATIVE FALLBACK (rarely used — the app ships as PWA) ────────────
   return (
     <TouchableOpacity
       ref={containerRef as any}
