@@ -1159,6 +1159,164 @@ async def import_festivals_bulk(
     }
 
 
+# ============ Highlights (video reels) ============
+
+
+class Highlight(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    entry_id: str  # links to an Entry (any type)
+    video_url: Optional[str] = ""  # external (Instagram/TikTok/YouTube/etc.)
+    video_file: Optional[str] = ""  # base64 data URI of an uploaded MP4 (≤20MB)
+    is_sponsored: bool = False
+    cta_text: Optional[str] = "ACHETER LE TICKET"
+    cta_link: Optional[str] = ""  # falls back to the linked entry's ticket_link
+    active: bool = True
+    order: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class HighlightCreate(BaseModel):
+    entry_id: str
+    video_url: Optional[str] = ""
+    video_file: Optional[str] = ""
+    is_sponsored: bool = False
+    cta_text: Optional[str] = "ACHETER LE TICKET"
+    cta_link: Optional[str] = ""
+    active: bool = True
+    order: Optional[int] = None
+
+
+class HighlightUpdate(BaseModel):
+    video_url: Optional[str] = None
+    video_file: Optional[str] = None
+    is_sponsored: Optional[bool] = None
+    cta_text: Optional[str] = None
+    cta_link: Optional[str] = None
+    active: Optional[bool] = None
+    order: Optional[int] = None
+
+
+MAX_HIGHLIGHT_VIDEO_BYTES = 20 * 1024 * 1024  # 20MB raw payload
+
+
+def _validate_video_size(b64: Optional[str]):
+    if not b64:
+        return
+    s = b64.split(",", 1)[-1] if "," in b64 else b64
+    if len(s) > int(MAX_HIGHLIGHT_VIDEO_BYTES * 1.4):
+        raise HTTPException(status_code=413, detail="Vidéo trop volumineuse (max 20MB)")
+
+
+async def _enrich_highlight(h: dict) -> dict:
+    entry = await db.entries.find_one({"id": h.get("entry_id")}, {"_id": 0})
+    if entry:
+        h["entry"] = {
+            "id": entry.get("id"),
+            "title": entry.get("title"),
+            "date": entry.get("date"),
+            "end_date": entry.get("end_date"),
+            "venue": entry.get("venue"),
+            "type": entry.get("type"),
+            "ticket_link": entry.get("ticket_link"),
+            "cover_photo": entry.get("cover_photo"),
+        }
+        if not h.get("cta_link"):
+            h["cta_link"] = entry.get("ticket_link") or ""
+    else:
+        h["entry"] = None
+    return h
+
+
+class HighlightOrderItem(BaseModel):
+    id: str
+    order: int
+
+
+@api_router.put("/highlights/order")
+async def reorder_highlights(
+    payload: List[HighlightOrderItem],
+    _u: User = Depends(require_admin),
+):
+    for it in payload:
+        await db.highlights.update_one({"id": it.id}, {"$set": {"order": it.order}})
+    return {"ok": True, "updated": len(payload)}
+
+
+@api_router.get("/highlights")
+async def list_highlights(include_inactive: bool = False, request: Request = None):
+    is_admin = False
+    if include_inactive and request is not None:
+        try:
+            u = await require_admin(request)
+            is_admin = bool(u)
+        except Exception:
+            is_admin = False
+    query: dict = {}
+    if not (include_inactive and is_admin):
+        query["active"] = True
+    items = await db.highlights.find(query, {"_id": 0}).to_list(200)
+    items.sort(key=lambda h: (h.get("order") or 0, h.get("created_at") or datetime.min))
+    items = [await _enrich_highlight(h) for h in items]
+    items = [h for h in items if h.get("entry")]
+    return items
+
+
+@api_router.post("/highlights")
+async def create_highlight(payload: HighlightCreate, _u: User = Depends(require_admin)):
+    if not payload.entry_id:
+        raise HTTPException(status_code=400, detail="entry_id requis")
+    entry = await db.entries.find_one({"id": payload.entry_id}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Event introuvable")
+    if not (payload.video_url or payload.video_file):
+        raise HTTPException(status_code=400, detail="video_url OU video_file requis")
+    _validate_video_size(payload.video_file)
+
+    if payload.order is None:
+        last = await db.highlights.find({}, {"_id": 0, "order": 1}).sort("order", -1).limit(1).to_list(1)
+        order = (last[0].get("order", 0) + 1) if last else 0
+    else:
+        order = payload.order
+
+    h = Highlight(
+        entry_id=payload.entry_id,
+        video_url=(payload.video_url or "").strip(),
+        video_file=payload.video_file or "",
+        is_sponsored=bool(payload.is_sponsored),
+        cta_text=(payload.cta_text or "ACHETER LE TICKET").strip(),
+        cta_link=(payload.cta_link or "").strip(),
+        active=bool(payload.active),
+        order=order,
+    )
+    await db.highlights.insert_one(h.dict())
+    return await _enrich_highlight(h.dict())
+
+
+@api_router.put("/highlights/{highlight_id}")
+async def update_highlight(
+    highlight_id: str,
+    payload: HighlightUpdate,
+    _u: User = Depends(require_admin),
+):
+    existing = await db.highlights.find_one({"id": highlight_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Highlight introuvable")
+    patch = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None}
+    _validate_video_size(patch.get("video_file"))
+    if patch:
+        await db.highlights.update_one({"id": highlight_id}, {"$set": patch})
+    refreshed = await db.highlights.find_one({"id": highlight_id}, {"_id": 0})
+    return await _enrich_highlight(refreshed)
+
+
+@api_router.delete("/highlights/{highlight_id}")
+async def delete_highlight(highlight_id: str, _u: User = Depends(require_admin)):
+    res = await db.highlights.delete_one({"id": highlight_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Highlight introuvable")
+    return {"ok": True}
+
+
 @api_router.post("/entries/{entry_id}/regenerate-occurrences")
 async def regenerate_occurrences(
     entry_id: str,

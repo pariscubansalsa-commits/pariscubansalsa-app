@@ -14,6 +14,7 @@ import { api, EntryItem, EntryType } from "./api";
 import EntryCard from "./EntryCard";
 import TopBar from "./TopBar";
 import FeaturedCarousel from "./FeaturedCarousel";
+import HighlightsCarousel from "./HighlightsCarousel";
 import { COLORS, FONTS, SPACING } from "./theme";
 import AuthCallback from "./AuthCallback";
 import { DanceStyleFilterChips, DanceStyle } from "./DanceStyle";
@@ -95,6 +96,11 @@ export default function EntriesScreen({
         ListHeaderComponent={
           <>
             {showFeatured && <FeaturedCarousel />}
+            {showFeatured && (
+              <View style={{ marginHorizontal: SPACING.screen }}>
+                <HighlightsCarousel />
+              </View>
+            )}
             <View style={styles.hero}>
               <Text style={styles.overline}>{overline}</Text>
               <Text style={styles.title}>{headline}</Text>

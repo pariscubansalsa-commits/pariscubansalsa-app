@@ -1957,4 +1957,94 @@ agent_communication:
             Booking: `…ss=Rovinj%20Croatie&checkin=2026-06-07&checkout=2026-06-16&group_adults=1` ✔
         - No section rendered on non-festival entries (workshops/soirees) ✔
         - Desktop layout: 2 buttons side-by-side ✔  Mobile: stacked ✔
+    - agent: "main"
+      message: |
+        ## FEATURE — HIGHLIGHTS 🎬 video reels section
+
+        ### Backend (`/app/backend/server.py`)
+        - New `Highlight` model + `highlights` Mongo collection.
+          Fields: `id, entry_id, video_url, video_file (base64 ≤20MB),
+          is_sponsored, cta_text, cta_link, active, order, created_at`.
+        - 5 endpoints (all admin except GET):
+          * `GET    /api/highlights[?include_inactive=true]` (public; admin
+            can see inactive). Sorted by `order` asc, enriched with linked
+            entry snapshot, dead links auto-pruned.
+          * `POST   /api/highlights` — create. Validates entry exists and
+            video_url OR video_file is provided. Auto-appends `order`.
+          * `PUT    /api/highlights/{id}` — partial update.
+          * `DELETE /api/highlights/{id}`
+          * `PUT    /api/highlights/order` — bulk reorder.
+        - Video size validator (413 if >~20MB base64).
+
+        ### Frontend public — `/app/frontend/src/HighlightsCarousel.tsx`
+        - Horizontal `ScrollView` of 9:16 cards (220×391px, dark bg).
+        - Each card supports 3 media types:
+          * **External embed** (YouTube/Instagram/TikTok detected by URL
+            regex) → `<iframe>` with `?autoplay=1&mute=1&playsinline=1`,
+            `pointer-events: none` so the card stays tappable.
+          * **Direct MP4** (uploaded `video_file` or external `.mp4` URL)
+            → HTML5 `<video muted autoPlay loop playsInline>` with a mute
+            toggle button (🔇/🔊 in top-left corner).
+          * **Fallback** to entry's `cover_photo` or a "PCS" placeholder.
+        - **IntersectionObserver** (threshold 0.5) plays/pauses the
+          `<video>` element only while the card is on screen — saves
+          mobile bandwidth.
+        - **Top-right yellow badge "PARTENAIRE"** when `is_sponsored`.
+        - **Bottom overlay** (semi-transparent dark): title 2 lines,
+          date range (handles multi-day events: "29 MAI – 1 JUIN"), venue,
+          then CTA pill button (defaults to "ACHETER LE TICKET").
+        - **Tap card** → router push `/entry/{entry_id}`.
+        - **Tap CTA** → `openExternal(cta_link || entry.ticket_link)`
+          (PWA-safe via existing helper).
+        - Analytics fired: `click_highlight` (card tap) and
+          `click_highlight_cta` (button tap), both carry `{entry_id, sponsored}`.
+
+        ### Integration on Soirées home (`EntriesScreen.tsx`)
+        - Inserted between `<FeaturedCarousel>` and the hero "SORTIES DU
+          MOMENT" header, only when `showFeatured=true` (Soirées tab only).
+        - Component returns `null` when no active highlights → no empty
+          state shown to users.
+
+        ### Admin (`/app/frontend/app/admin/highlights.tsx`)
+        - New full-page admin route + dashboard tile entry added in
+          `/admin/index.tsx` (icon: videocam-outline).
+        - List view: 1 row per highlight with order arrows (↑↓ to reorder),
+          inline switch for `active`, edit/delete icons.
+        - Modal form for add/edit:
+          * Searchable event picker (title/venue/date substring)
+          * File upload via `<input type="file" accept=video/*>` →
+            FileReader → base64 data URI (20MB hard limit, client check).
+          * OR external URL textfield (mutually exclusive with upload).
+          * Toggles for "Partenaire" + "Actif".
+          * Custom CTA text + link (defaults inherited from event's
+            `ticket_link` if cta_link empty).
+
+        ### API client (`/app/frontend/src/api.ts`)
+        - Added: `listHighlights`, `createHighlight`, `updateHighlight`,
+          `deleteHighlight`, `reorderHighlights`.
+
+        ### Verified end-to-end
+        - Created 2 test highlights via curl:
+          * YouTube Short embed (sponsored, "RÉSERVER MAINTENANT" CTA)
+            linked to "Paris Salsa Congress" festival.
+          * Direct MP4 (organic) linked to "Cubasanga" festival.
+        - GET /api/highlights returned both, ordered correctly.
+        - Playwright @ 390×844:
+          * Section renders between coups-de-cœur and "SORTIES DU MOMENT"
+          * 2 cards visible with iframe + video element respectively
+          * PARTENAIRE badge displayed on sponsored card
+          * Date range "29 MAI – 1 JUIN" correctly formatted
+          * CTA buttons render with custom text
+        - Admin page `/admin/highlights` loaded:
+          * "0 highlight" empty state (before seeding), search/upload modal
+            opens, all toggles + CTA fields present.
+          * Event picker dropdown lists agenda/festival/workshop entries.
+
+        ### NOT implemented (deferred)
+        - Backend video compression to 720p H.264. We rely on the 20MB
+          base64 limit for now; partners can preprocess with HandBrake/ffmpeg.
+        - Drag-and-drop reorder (uses up/down arrows instead — simpler &
+          works on touch without a DnD lib).
+        - Per-highlight view/click stats dashboard (analytics events are
+          already firing — dashboard can be added later from raw events).
         correctly everywhere.

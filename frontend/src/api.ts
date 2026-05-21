@@ -526,4 +526,38 @@ export const api = {
       method: "POST",
       headers: authHeaders(token),
     }).then((r) => handle<any>(r)),
+
+  // ─── Highlights ──────────────────────────────────────────────────────────
+  listHighlights: (token?: string, includeInactive = false) =>
+    fetch(
+      `${API}/highlights${includeInactive ? "?include_inactive=true" : ""}`,
+      { headers: token ? authHeaders(token) : {} }
+    ).then((r) => handle<any[]>(r)),
+
+  createHighlight: (token: string, body: any) =>
+    fetch(`${API}/highlights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(body),
+    }).then((r) => handle<any>(r)),
+
+  updateHighlight: (token: string, id: string, body: any) =>
+    fetch(`${API}/highlights/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(body),
+    }).then((r) => handle<any>(r)),
+
+  deleteHighlight: (token: string, id: string) =>
+    fetch(`${API}/highlights/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    }).then((r) => handle<any>(r)),
+
+  reorderHighlights: (token: string, items: { id: string; order: number }[]) =>
+    fetch(`${API}/highlights/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(items),
+    }).then((r) => handle<any>(r)),
 };

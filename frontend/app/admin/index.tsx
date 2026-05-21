@@ -51,6 +51,13 @@ export default function AdminDashboard() {
       icon: "images-outline" as const,
       path: "/admin/gallery",
     },
+    {
+      key: "highlights",
+      title: "Highlights vidéo",
+      desc: "Reels affichés en home — partenaires, ordre, activation",
+      icon: "videocam-outline" as const,
+      path: "/admin/highlights",
+    },
   ];
 
   return (
