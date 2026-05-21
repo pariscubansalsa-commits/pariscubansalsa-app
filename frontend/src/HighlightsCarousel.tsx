@@ -96,9 +96,8 @@ export default function HighlightsCarousel() {
   return (
     <View style={styles.section} testID="highlights-carousel">
       <View style={styles.header}>
-        <Text style={styles.overline}>HIGHLIGHTS 🎬</Text>
         <Text style={styles.title}>
-          Le mois en{" "}
+          Les soirées en{" "}
           <Text
             style={{
               fontFamily: FONTS.headingItalic,
@@ -326,7 +325,7 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
 }
 
 const styles = StyleSheet.create({
-  section: { marginTop: 12, marginBottom: 4 },
+  section: { marginTop: 24, marginBottom: 4 },
   header: { paddingHorizontal: 0, marginBottom: 12 },
   overline: {
     fontFamily: FONTS.bodyBold,

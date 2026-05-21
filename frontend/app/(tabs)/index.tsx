@@ -12,7 +12,7 @@ export default function Index() {
       useCalendar
       headline={
         <>
-          Le mois{" "}
+          Les soirées{" "}
           <Text
             style={{
               fontFamily: FONTS.headingItalic,

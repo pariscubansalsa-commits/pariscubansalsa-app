@@ -79,10 +79,10 @@ export default function FeaturedCarousel() {
   return (
     <View style={styles.wrap} testID="featured-carousel">
       <View style={styles.header}>
-        <Text style={styles.label}>
-          NOS COUPS DE <Text style={styles.labelAccent}>COEUR</Text>
+        <Text style={styles.sectionTitle}>
+          Nos coups de{" "}
+          <Text style={styles.sectionTitleAccent}>cœur.</Text>
         </Text>
-        <Ionicons name="heart" size={14} color={COLORS.accentYellow} />
       </View>
       <ScrollView
         horizontal
@@ -146,17 +146,30 @@ export default function FeaturedCarousel() {
 const styles = StyleSheet.create({
   wrap: {
     backgroundColor: "#1A1A1A",
-    paddingTop: 24,
-    paddingBottom: 28,
+    paddingTop: 0,
+    paddingBottom: 24,
     marginHorizontal: -SPACING.screen,
-    marginBottom: 4,
+    marginBottom: 0,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: SPACING.screen,
-    marginBottom: 16,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontFamily: FONTS.heading,
+    fontSize: 22,
+    lineHeight: 26,
+    letterSpacing: -0.4,
+    color: "#fff",
+  },
+  sectionTitleAccent: {
+    fontFamily: FONTS.headingItalic,
+    fontStyle: "italic",
+    color: COLORS.accentYellow,
   },
   label: {
     fontFamily: FONTS.bodyBold,
