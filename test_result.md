@@ -1909,4 +1909,52 @@ agent_communication:
         - /app/frontend/src/EntryCard.tsx (flag badge + styles)
         - /app/frontend/app/(tabs)/festivals.tsx (country filter logic
           + CountryChip + chip styles)
+    - agent: "main"
+      message: |
+        ## FEATURE — "Préparer ton voyage" section on festival detail
+
+        ### New helper
+        `/app/frontend/src/travelLinks.ts`:
+        - `SKYSCANNER_CITY_CODES`: city → 3/4-char Skyscanner code map
+          covering all 21 PCS countries (e.g. Rovinj → puy=Pula nearest,
+          Wieliczka → krk=Krakow nearest, Bali → dps, La Havane → hav,
+          Augsbourg → muc=Munich nearest, etc.). Diacritic-insensitive.
+        - `buildSkyscannerUrl(city, date, end_date)` →
+          `https://www.skyscanner.fr/transport/vols/pari/{code}/{YYMMDD-1}/{YYMMDD+1}/`
+          Fallback to `?query=<city>` if city not in map.
+        - `buildSncfConnectUrl(city, date)` →
+          `https://www.sncf-connect.com/app/home/search?destination=<city>&outwardDate=<YYYY-MM-DD-1>`
+        - `buildOuigoUrl(city, date)` →
+          `https://www.ouigo.com/recherche?destination=<city>&outwardDate=<YYYY-MM-DD-1>`
+        - `buildBookingUrl(city, country, date, end_date)` →
+          `https://www.booking.com/searchresults.fr.html?ss=<city>+<country>&checkin=<YYYY-MM-DD-1>&checkout=<YYYY-MM-DD+1>&group_adults=1`
+        - `isFranceFestival(country)`: case/diacritic-insensitive France check.
+        - All dates shift -1 day for outward and +1 day for return automatically.
+
+        ### UI on festival detail (`app/entry/[id].tsx`)
+        Section "PRÉPARER TON VOYAGE" added between description and ticket
+        button, only for `entry.type === "festival"`. Styled as a soft yellow
+        callout box (#FFFBEA bg, #F0E2A0 border, 14px radius). Contains:
+        - Title "✈️ PRÉPARER TON VOYAGE"
+        - Subtitle adapts: "Train depuis Paris + hébergement sur place." for
+          France, "Vol depuis Paris + hébergement sur place." otherwise.
+        - Buttons (white bg, black border, pill shape, flex-wrap row →
+          side-by-side desktop, stacked mobile):
+            * France: 🚄 SNCF CONNECT + 🚄 OUIGO + 🏨 HÉBERGEMENT (3 buttons)
+            * Étranger: ✈️ TROUVER UN VOL + 🏨 HÉBERGEMENT (2 buttons)
+        - Disclaimer italic small text: "Liens partenaires externes…"
+        - Analytics: each click fires `track("click_travel", {entry_id, provider, city})`.
+        - Opens via existing `openExternal()` helper → PWA-safe (uses anchor click).
+
+        ### Verified
+        Playwright @ 390×844 (mobile) and 1280×800 (desktop):
+        - Cubasanga (FR, Biscarrosse, 19→22 juin 2026):
+            SNCF: `…?destination=Biscarrosse&outwardDate=2026-06-18` ✔
+            Ouigo: `…?destination=Biscarrosse&outwardDate=2026-06-18` ✔
+            Booking: `…ss=Biscarrosse%20France&checkin=2026-06-18&checkout=2026-06-23&group_adults=1` ✔
+        - Croatian Summer Salsa (HR, Rovinj, 8→15 juin 2026):
+            Skyscanner: `…/pari/puy/260607/260616/` (puy=Pula nearest) ✔
+            Booking: `…ss=Rovinj%20Croatie&checkin=2026-06-07&checkout=2026-06-16&group_adults=1` ✔
+        - No section rendered on non-festival entries (workshops/soirees) ✔
+        - Desktop layout: 2 buttons side-by-side ✔  Mobile: stacked ✔
         correctly everywhere.

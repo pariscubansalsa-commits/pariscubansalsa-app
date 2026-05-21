@@ -28,6 +28,13 @@ import InstagramEmbed from "../../src/InstagramEmbed";
 import EntryGallery from "../../src/EntryGallery";
 import AdminGalleryManager from "../../src/AdminGalleryManager";
 import { openExternal } from "../../src/links";
+import {
+  buildSkyscannerUrl,
+  buildSncfConnectUrl,
+  buildOuigoUrl,
+  buildBookingUrl,
+  isFranceFestival,
+} from "../../src/travelLinks";
 
 const openLink = (url: string) => openExternal(url);
 
@@ -363,6 +370,98 @@ export default function EntryDetail() {
 
           {!!entry.description && (
             <Text style={styles.desc}>{entry.description}</Text>
+          )}
+
+          {/* PRÉPARER TON VOYAGE — only for festivals */}
+          {isFestival && (
+            <View style={styles.travelSection} testID="travel-section">
+              <Text style={styles.travelTitle}>✈️ PRÉPARER TON VOYAGE</Text>
+              <Text style={styles.travelSub}>
+                {isFranceFestival(entry.country)
+                  ? "Train depuis Paris + hébergement sur place."
+                  : "Vol depuis Paris + hébergement sur place."}
+              </Text>
+              <View style={styles.travelBtnRow}>
+                {isFranceFestival(entry.country) ? (
+                  <>
+                    <TouchableOpacity
+                      testID="travel-sncf"
+                      style={styles.travelBtn}
+                      onPress={() => {
+                        track("click_travel", {
+                          entry_id: entry.id,
+                          extra: { provider: "sncf-connect", city: entry.venue },
+                        });
+                        openLink(
+                          buildSncfConnectUrl(entry.venue || entry.country, entry.date)
+                        );
+                      }}
+                    >
+                      <Text style={styles.travelBtnIcon}>🚄</Text>
+                      <Text style={styles.travelBtnTxt}>SNCF CONNECT</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      testID="travel-ouigo"
+                      style={styles.travelBtn}
+                      onPress={() => {
+                        track("click_travel", {
+                          entry_id: entry.id,
+                          extra: { provider: "ouigo", city: entry.venue },
+                        });
+                        openLink(
+                          buildOuigoUrl(entry.venue || entry.country, entry.date)
+                        );
+                      }}
+                    >
+                      <Text style={styles.travelBtnIcon}>🚄</Text>
+                      <Text style={styles.travelBtnTxt}>OUIGO</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    testID="travel-flight"
+                    style={styles.travelBtn}
+                    onPress={() => {
+                      track("click_travel", {
+                        entry_id: entry.id,
+                        extra: { provider: "skyscanner", city: entry.venue },
+                      });
+                      openLink(
+                        buildSkyscannerUrl(entry.venue, entry.date, entry.end_date)
+                      );
+                    }}
+                  >
+                    <Text style={styles.travelBtnIcon}>✈️</Text>
+                    <Text style={styles.travelBtnTxt}>TROUVER UN VOL</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  testID="travel-hotel"
+                  style={styles.travelBtn}
+                  onPress={() => {
+                    track("click_travel", {
+                      entry_id: entry.id,
+                      extra: { provider: "booking", city: entry.venue },
+                    });
+                    openLink(
+                      buildBookingUrl(
+                        entry.venue,
+                        entry.country,
+                        entry.date,
+                        entry.end_date
+                      )
+                    );
+                  }}
+                >
+                  <Text style={styles.travelBtnIcon}>🏨</Text>
+                  <Text style={styles.travelBtnTxt}>HÉBERGEMENT</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.travelDisclaimer}>
+                Liens partenaires externes — Paris Cuban Salsa ne gère pas
+                les réservations.
+              </Text>
+            </View>
           )}
 
           {!!entry.instagram_post && <InstagramEmbed url={entry.instagram_post} />}
@@ -866,6 +965,62 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     color: COLORS.secondaryText,
     marginTop: 20,
+  },
+  travelSection: {
+    marginTop: 24,
+    padding: 16,
+    backgroundColor: "#FFFBEA",
+    borderWidth: 1,
+    borderColor: "#F0E2A0",
+    borderRadius: 14,
+  },
+  travelTitle: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 13,
+    letterSpacing: 1.6,
+    color: COLORS.primaryText,
+  },
+  travelSub: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: COLORS.secondaryText,
+    marginTop: 6,
+    marginBottom: 14,
+  },
+  travelBtnRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  travelBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primaryText,
+    backgroundColor: "#fff",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 40,
+    flexGrow: 1,
+    minWidth: 140,
+  },
+  travelBtnIcon: { fontSize: 16, lineHeight: 18 },
+  travelBtnTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: COLORS.primaryText,
+  },
+  travelDisclaimer: {
+    fontFamily: FONTS.body,
+    fontSize: 10,
+    lineHeight: 14,
+    color: COLORS.secondaryText,
+    marginTop: 12,
+    fontStyle: "italic",
   },
   ticketBtn: {
     flexDirection: "row",
