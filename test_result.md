@@ -2048,3 +2048,36 @@ agent_communication:
         - Per-highlight view/click stats dashboard (analytics events are
           already firing — dashboard can be added later from raw events).
         correctly everywhere.
+
+  - task: "BUG FIX — Highlights overlay missing on first card (iOS native <video> stacking)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/HighlightsCarousel.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            User reported the bottom overlay (title/date/CTA) only appeared on
+            the SECOND highlight card, not the first. Root cause: iOS Safari
+            natively composites <video> elements in their OWN GPU layer that
+            sits above sibling DOM regardless of z-index. The 1st card used a
+            direct <video> stream, the 2nd used a YouTube <iframe> (which is
+            just HTML — no native compositing bug).
+
+            Fix: promote the overlay, partner badge, and mute toggle to their
+            own GPU compositing layer with `transform: translate3d(0,0,0)` +
+            `WebkitTransform` + `willChange: transform`. This forces them
+            on top of the iOS native video layer reliably.
+
+            Verified via Playwright @ 390×844 (mobile viewport):
+            - Card 0 (Paris Salsa Congress, direct <video>): overlay visible
+              with PARTENAIRE badge, title "Paris Salsa Congress", date
+              "29 MAI – 1 JUIN", venue, and "VOIR EVENT 1" CTA.
+            - Card 1 (Baila NY Dance Festival, YouTube iframe): overlay visible
+              with title, date "19 MAI – 22 MAI", venue, and "ACHETER LE TICKET"
+              CTA.
+            Both cards have `data-testid="highlight-cta-{id}"` present and
+            inner text confirms titles render correctly.

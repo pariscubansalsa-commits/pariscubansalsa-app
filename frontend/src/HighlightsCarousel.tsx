@@ -318,7 +318,7 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
           )}
         </div>
 
-        {/* Partner badge — z-index 3 */}
+        {/* Partner badge — z-index 3 (GPU layer to beat iOS native <video>) */}
         {highlight.is_sponsored && (
           <div
             style={{
@@ -333,7 +333,10 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
               padding: "3px 6px",
               borderRadius: 40,
               pointerEvents: "none",
-            }}
+              transform: "translate3d(0,0,0)",
+              WebkitTransform: "translate3d(0,0,0)",
+              willChange: "transform",
+            } as any}
           >
             <Ionicons name="heart" size={10} color={COLORS.primaryText} />
             <span
@@ -349,7 +352,7 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
           </div>
         )}
 
-        {/* Mute toggle — z-index 3 */}
+        {/* Mute toggle — z-index 3 (GPU layer to beat iOS native <video>) */}
         {!embedUrl && directVideoSrc && (
           <div
             onClick={toggleMute as any}
@@ -367,7 +370,10 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
-            }}
+              transform: "translate3d(0,0,0)",
+              WebkitTransform: "translate3d(0,0,0)",
+              willChange: "transform",
+            } as any}
           >
             <Ionicons
               name={muted ? "volume-mute" : "volume-high"}
@@ -377,7 +383,7 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
           </div>
         )}
 
-        {/* Bottom overlay — z-index 10 (guaranteed above iframes) */}
+        {/* Bottom overlay — z-index 10 + GPU layer (beats iOS native <video>) */}
         <div
           style={{
             position: "absolute",
@@ -389,7 +395,14 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
             paddingTop: 22,
             backgroundImage:
               "linear-gradient(to top, rgba(0,0,0,0.92) 60%, rgba(0,0,0,0.2) 100%)",
-          }}
+            // iOS Safari natively composites <video> in its own layer that
+            // can sit ABOVE sibling DOM. Forcing the overlay into its own
+            // GPU layer via translate3d() puts it on top reliably.
+            transform: "translate3d(0,0,0)",
+            WebkitTransform: "translate3d(0,0,0)",
+            willChange: "transform",
+            WebkitBackfaceVisibility: "hidden",
+          } as any}
         >
           <div style={{ marginBottom: 8 }}>
             <div
