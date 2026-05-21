@@ -28,6 +28,7 @@ import InstagramEmbed from "../../src/InstagramEmbed";
 import EntryGallery from "../../src/EntryGallery";
 import AdminGalleryManager from "../../src/AdminGalleryManager";
 import { openExternal } from "../../src/links";
+import LikeButton from "../../src/LikeButton";
 import {
   buildSkyscannerUrl,
   buildSncfConnectUrl,
@@ -328,6 +329,15 @@ export default function EntryDetail() {
           )}
 
           <Text style={styles.title}>{entry.title}</Text>
+
+          <View style={styles.likeRow}>
+            <LikeButton
+              entryId={entry.id}
+              initialCount={entry.likes ?? 0}
+              size="large"
+              stopPropagation={false}
+            />
+          </View>
 
           <View style={styles.metaGroup}>
             {!!entry.time && (
@@ -956,6 +966,7 @@ const styles = StyleSheet.create({
     color: COLORS.primaryText,
   },
   metaGroup: { marginTop: 18, gap: 10 },
+  likeRow: { flexDirection: "row", marginTop: 14, alignSelf: "flex-start" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   metaTxt: { fontFamily: FONTS.body, fontSize: 14, color: COLORS.primaryText, flex: 1 },
   metaLink: { textDecorationLine: "underline" },

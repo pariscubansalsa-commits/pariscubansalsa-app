@@ -70,6 +70,7 @@ export type EntryItem = {
   source?: "manual" | "gcal" | "submission" | "organizer";
   external_id?: string | null;
   last_modified_at?: string | null;
+  likes?: number;
   created_at?: string;
 };
 
@@ -149,6 +150,14 @@ export const api = {
     }).then((r) => handle<TagItem>(r)),
 
   // Entries
+  likeEntry: (id: string) =>
+    fetch(`${API}/entries/${id}/like`, { method: "POST" }).then((r) =>
+      handle<{ likes: number }>(r)
+    ),
+  unlikeEntry: (id: string) =>
+    fetch(`${API}/entries/${id}/unlike`, { method: "POST" }).then((r) =>
+      handle<{ likes: number }>(r)
+    ),
   listEntries: (type?: EntryType, danceStyle?: string) => {
     const qs = new URLSearchParams();
     if (type) qs.set("type", type);

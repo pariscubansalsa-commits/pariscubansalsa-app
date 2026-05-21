@@ -2081,3 +2081,67 @@ agent_communication:
               CTA.
             Both cards have `data-testid="highlight-cta-{id}"` present and
             inner text confirms titles render correctly.
+
+
+  - task: "FEATURE — Public Likes on entries (no auth)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py, /app/frontend/src/LikeButton.tsx, /app/frontend/src/EntryCard.tsx, /app/frontend/app/entry/[id].tsx, /app/frontend/src/api.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            Public, login-less like system on every event entry.
+
+            Backend (`/app/backend/server.py`):
+            - Added `likes: int = 0` field on the `Entry` model (back-compat:
+              missing field defaults to 0 on existing docs).
+            - `POST /api/entries/{id}/like` and `POST /api/entries/{id}/unlike`
+              public endpoints — NO auth required.
+            - Per-IP rate-limit: 1 like/unlike action per IP per entry per
+              60 seconds via an in-memory dict keyed by "ip::entry_id".
+              Returns 429 with French message on violation.
+            - IP resolution honours `X-Forwarded-For` / `X-Real-IP` (Cloudflare
+              + Railway proxy compatible).
+            - Both endpoints return `{ "likes": <new_total> }`.
+            - Verified via curl: like→1, second from same IP→429, unlike from
+              different IP→0, persisted in MongoDB.
+
+            Frontend (`/app/frontend/src/LikeButton.tsx`):
+            - Reusable component with `size` prop (`small` for cards, `medium`,
+              `large` for detail page). Heart goes from outline grey to filled
+              yellow (#F5C518) with a scale-bounce Animated sequence on like.
+            - Stores liked entry IDs in `localStorage.pcs_likes` (JSON array).
+              On mount reads the set to know whether the heart starts filled.
+            - Optimistic UI: bumps count instantly, rolls back on 429.
+            - Cross-instance sync via a custom `pcs:like-changed` window event
+              so a Like on a card refreshes the matching detail-page heart
+              and vice-versa.
+            - Tracks `like_entry` / `unlike_entry` analytics events.
+
+            Integration:
+            - `EntryCard.tsx` renders `<LikeButton size="small" />` in the
+              actions row, always visible (left of ticket button). Confirmed
+              25 cards on home with 25 like buttons.
+            - `/entry/[id].tsx` renders `<LikeButton size="large" />` just
+              below the title — 44px tall, respects iOS touch-target rule.
+            - `EntryItem` TypeScript shape extended with `likes?: number`.
+            - `api.likeEntry(id)` and `api.unlikeEntry(id)` methods added.
+
+            Verified via Playwright @ 390×844:
+            - Home list: 25 like buttons rendered. Clicking one updates count
+              0→1, icon switches from heart-outline to filled yellow, border
+              gains yellow accent, localStorage.pcs_likes contains the ID.
+            - Detail page: bouton large affiche initialement `♡ 0`, après
+              clic `♥ 1`. Persistance vérifiée en pré-seedant localStorage
+              avant navigation → heart démarre rempli.
+            - Rate-limit: après un 1er like, le 2e clic du même IP renvoie
+              429 et l'UI fait un rollback optimiste correct (compteur reste
+              à 1, coeur reste jaune, localStorage inchangé).
+
+            Note: les "Coups de coeur" (FeaturedCarousel + `status='featured'`)
+            sont conservés strictement séparés du système de likes — ils
+            restent réservés aux partenaires officiels via l'admin.

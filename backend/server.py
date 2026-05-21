@@ -10,7 +10,7 @@ import re
 from icalendar import Calendar
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timezone, timedelta, date as date_type
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
@@ -155,6 +155,7 @@ class Entry(BaseModel):
     source: str = "manual"  # 'manual' | 'gcal' | 'submission' | 'organizer' | 'artiste'
     external_id: Optional[str] = None  # iCal UID for gcal sync
     last_modified_at: Optional[datetime] = None  # for gcal change detection
+    likes: int = 0  # public like counter (no auth required, rate-limited per IP)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -891,6 +892,7 @@ async def list_entries(
         return (priority, _norm_date(e.get("date")), e.get("time") or "")
     items.sort(key=sort_key)
 
+    await attach_likes(items)
     return [Entry(**e) for e in items]
 
 
@@ -1010,6 +1012,113 @@ async def unfeature_entry(entry_id: str, _user: User = Depends(require_admin)):
     return Entry(**existing)
 
 
+# ───────────────────────── Public likes (no auth) ─────────────────────────
+# Anyone can like/unlike an entry. We rate-limit per IP+entry to one
+# action per 60 seconds to make brute-force spam mildly annoying without
+# blocking legitimate users. The frontend tracks the user's likes in
+# localStorage so the heart fills properly on revisit.
+_likes_rate: Dict[str, float] = {}
+_LIKES_WINDOW_SEC = 60.0
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_like_rate(ip: str, entry_id: str) -> None:
+    key = f"{ip}::{entry_id}"
+    now = datetime.now(timezone.utc).timestamp()
+    last = _likes_rate.get(key, 0.0)
+    if now - last < _LIKES_WINDOW_SEC:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Trop de likes successifs. Réessaye dans {int(_LIKES_WINDOW_SEC - (now - last))}s.",
+        )
+    _likes_rate[key] = now
+    # Drop stale entries occasionally to avoid unbounded memory growth.
+    if len(_likes_rate) > 5000:
+        cutoff = now - _LIKES_WINDOW_SEC * 10
+        for k, v in list(_likes_rate.items()):
+            if v < cutoff:
+                _likes_rate.pop(k, None)
+
+
+@api_router.post("/entries/{entry_id}/like")
+async def like_entry(entry_id: str, request: Request):
+    # Accept ANY known entry: DB entry OR iCal feed event (calendar-only).
+    in_db = await db.entries.find_one({"id": entry_id}, {"_id": 0, "id": 1})
+    in_cal = False
+    if not in_db:
+        try:
+            in_cal = any((it.get("id") == entry_id) for it in fetch_calendar_entries())
+        except Exception:
+            in_cal = False
+    if not in_db and not in_cal:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    _check_like_rate(_client_ip(request), entry_id)
+    # Store the counter in a dedicated collection so calendar-only entries
+    # (which never live in db.entries) can also be liked.
+    await db.entry_likes.update_one(
+        {"_id": entry_id}, {"$inc": {"count": 1}}, upsert=True
+    )
+    doc = await db.entry_likes.find_one({"_id": entry_id}, {"count": 1})
+    new_count = int((doc or {}).get("count") or 0)
+    # Mirror onto db.entries for backward-compat reads.
+    if in_db:
+        await db.entries.update_one({"id": entry_id}, {"$set": {"likes": new_count}})
+    return {"likes": new_count}
+
+
+@api_router.post("/entries/{entry_id}/unlike")
+async def unlike_entry(entry_id: str, request: Request):
+    in_db = await db.entries.find_one({"id": entry_id}, {"_id": 0, "id": 1})
+    in_cal = False
+    if not in_db:
+        try:
+            in_cal = any((it.get("id") == entry_id) for it in fetch_calendar_entries())
+        except Exception:
+            in_cal = False
+    if not in_db and not in_cal:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    _check_like_rate(_client_ip(request), entry_id)
+    doc = await db.entry_likes.find_one({"_id": entry_id}, {"count": 1})
+    current = int((doc or {}).get("count") or 0)
+    if current <= 0:
+        if in_db:
+            await db.entries.update_one({"id": entry_id}, {"$set": {"likes": 0}})
+        return {"likes": 0}
+    await db.entry_likes.update_one({"_id": entry_id}, {"$inc": {"count": -1}})
+    new_count = max(0, current - 1)
+    if in_db:
+        await db.entries.update_one({"id": entry_id}, {"$set": {"likes": new_count}})
+    return {"likes": new_count}
+
+
+async def attach_likes(items: List[dict]) -> List[dict]:
+    """Batch-populate `likes` field on a list of plain dicts using the
+    `entry_likes` collection. Mutates in-place and returns the list.
+    Works for both DB entries and calendar-feed items.
+    """
+    if not items:
+        return items
+    ids = [it.get("id") for it in items if it.get("id")]
+    if not ids:
+        return items
+    cursor = db.entry_likes.find({"_id": {"$in": ids}}, {"_id": 1, "count": 1})
+    by_id: Dict[str, int] = {}
+    async for d in cursor:
+        by_id[str(d.get("_id"))] = int(d.get("count") or 0)
+    for it in items:
+        eid = it.get("id")
+        if eid is not None:
+            it["likes"] = by_id.get(eid, int(it.get("likes") or 0))
+    return items
+
+
+
 @api_router.get("/teachers/{teacher_id}/workshops", response_model=List[Entry])
 async def teacher_workshops(teacher_id: str):
     today = today_paris_str()
@@ -1035,10 +1144,12 @@ async def teacher_workshops(teacher_id: str):
 async def get_entry(entry_id: str):
     e = await db.entries.find_one({"id": entry_id}, {"_id": 0})
     if e:
+        await attach_likes([e])
         return Entry(**e)
     # Fallback: check calendar feed (read-only events)
     for cal_ev in fetch_calendar_entries():
         if cal_ev.get("id") == entry_id:
+            await attach_likes([cal_ev])
             return Entry(**cal_ev)
     raise HTTPException(status_code=404, detail="Entry not found")
 
@@ -1660,7 +1771,9 @@ def _is_future_or_today(item: dict) -> bool:
 @api_router.get("/calendar/events")
 async def calendar_events():
     """Return upcoming iCal events only (server-side filter)."""
-    return [e for e in fetch_calendar_entries() if _is_future_or_today(e)]
+    items = [e for e in fetch_calendar_entries() if _is_future_or_today(e)]
+    await attach_likes(items)
+    return items
 
 
 # ========= Google Calendar Sync — pending queue =========

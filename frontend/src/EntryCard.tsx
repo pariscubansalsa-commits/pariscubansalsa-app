@@ -14,6 +14,7 @@ import { EntryItem } from "./api";
 import { DanceStyleBadge } from "./DanceStyle";
 import { openExternal } from "./links";
 import { getCountryInfo } from "./countries";
+import LikeButton from "./LikeButton";
 
 const MONTHS_FR = [
   "janv.", "févr.", "mars", "avril", "mai", "juin",
@@ -173,6 +174,11 @@ export default function EntryCard({
           )}
 
           <View style={styles.actions}>
+            <LikeButton
+              entryId={entry.id}
+              initialCount={entry.likes ?? 0}
+              size="small"
+            />
             {!!entry.ticket_link && (
               <TouchableOpacity
                 testID={`ticket-${entry.id}`}
