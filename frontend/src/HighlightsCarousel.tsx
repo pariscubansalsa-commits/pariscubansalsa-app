@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "./api";
+import { api, BACKEND_URL } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { openExternal } from "./links";
 import { track } from "./analytics";
@@ -131,40 +131,41 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
   const containerRef = useRef<View>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [muted, setMuted] = useState(true);
-  const [visible, setVisible] = useState(false);
+  // Start as visible=true so the <video autoPlay> attribute kicks in
+  // immediately on mount. The IntersectionObserver only ever toggles us off
+  // when the card is far out of the viewport (saves bandwidth without
+  // breaking the initial autoplay frame).
+  const [visible, setVisible] = useState(true);
 
-  // IntersectionObserver — autoplay only when visible (web only — RN Native
-  // doesn't support raw <video>, but we run as a PWA so always web).
+  // IntersectionObserver — pause when the card is fully off-screen.
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
-    // @ts-ignore RN web compatibility
-    const el = (containerRef.current as any)?._nativeTag
-      ? null
-      : (containerRef.current as any as HTMLElement | null);
-    // RN web → containerRef is the underlying div directly
-    const node = (el || (containerRef.current as any)) as HTMLElement | null;
+    const node = (containerRef.current as any as HTMLElement | null);
     if (!node) return;
-
     const io = new IntersectionObserver(
       (entries) => {
         for (const en of entries) {
-          setVisible(en.isIntersecting && en.intersectionRatio > 0.5);
+          // Only pause when the card has fully left the viewport.
+          setVisible(en.isIntersecting);
         }
       },
-      { threshold: [0, 0.5, 1] }
+      { threshold: [0, 0.1] }
     );
     io.observe(node);
     return () => io.disconnect();
   }, []);
 
-  // Drive the <video> element when visibility changes
+  // Drive the <video> element when visibility changes. Never throws — iOS
+  // sometimes rejects programmatic play() the very first frame, but the
+  // autoPlay attribute itself will have already started the video.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     if (visible) {
-      v.play().catch(() => {});
+      const p = v.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
     } else {
-      v.pause();
+      try { v.pause(); } catch {}
     }
   }, [visible]);
 
@@ -199,7 +200,21 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
   };
 
   const embedUrl = highlight.video_url ? getEmbedUrl(highlight.video_url) : null;
-  const directVideoSrc = highlight.video_file || (!embedUrl ? highlight.video_url : "");
+  // Resolve `/api/highlights/{id}/video` (returned by the backend after the
+  // base64 strip optimisation) to an ABSOLUTE URL against BACKEND_URL,
+  // otherwise the prod PWA would request the path against the frontend's
+  // own domain (pariscubansalsa.com) which doesn't host the API (it's on
+  // api.pariscubansalsa.com via Railway).
+  const resolveSrc = (s: string | undefined | null): string => {
+    if (!s) return "";
+    if (s.startsWith("/api/") && BACKEND_URL) {
+      return `${BACKEND_URL}${s}`;
+    }
+    return s;
+  };
+  const directVideoSrc = resolveSrc(
+    highlight.video_file || (!embedUrl ? highlight.video_url : "")
+  );
   const entry = highlight.entry;
   const dateLabel = entry
     ? entry.end_date && entry.end_date !== entry.date
