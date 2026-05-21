@@ -160,9 +160,10 @@ const styles = StyleSheet.create({
   },
   label: {
     fontFamily: FONTS.bodyBold,
-    fontSize: 13,
+    fontSize: 11,
     letterSpacing: 2,
-    color: "#fff",
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.55)",
   },
   labelAccent: {
     color: COLORS.accentYellow,

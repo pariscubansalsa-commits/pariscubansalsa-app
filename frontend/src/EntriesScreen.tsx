@@ -99,6 +99,7 @@ export default function EntriesScreen({
             {showFeatured && (
               <View style={{ marginHorizontal: SPACING.screen }}>
                 <HighlightsCarousel />
+                <View style={styles.sectionDivider} />
               </View>
             )}
             <View style={styles.hero}>
@@ -155,18 +156,26 @@ export default function EntriesScreen({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   hero: { paddingTop: 12, paddingBottom: 18 },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: "#333",
+    marginVertical: 8,
+    marginHorizontal: 0,
+    opacity: 0.25,
+  },
   overline: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
-    letterSpacing: 1.6,
-    color: COLORS.secondaryText,
-    marginBottom: 8,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    color: "#888",
+    marginBottom: 6,
   },
   title: {
     fontFamily: FONTS.heading,
-    fontSize: 38,
-    lineHeight: 42,
-    letterSpacing: -1,
+    fontSize: 22,
+    lineHeight: 26,
+    letterSpacing: -0.4,
     color: COLORS.primaryText,
   },
   subtitle: {

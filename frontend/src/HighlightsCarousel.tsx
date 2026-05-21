@@ -331,15 +331,16 @@ const styles = StyleSheet.create({
   overline: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
-    letterSpacing: 1.6,
-    color: COLORS.secondaryText,
-    marginBottom: 4,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    color: "#888",
+    marginBottom: 6,
   },
   title: {
     fontFamily: FONTS.heading,
-    fontSize: 26,
-    lineHeight: 30,
-    letterSpacing: -0.5,
+    fontSize: 22,
+    lineHeight: 26,
+    letterSpacing: -0.4,
     color: COLORS.primaryText,
   },
   card: {
