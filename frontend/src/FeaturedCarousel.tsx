@@ -102,7 +102,22 @@ export default function FeaturedCarousel() {
               onPress={() => router.push(`/entry/${item.id}` as any)}
             >
               {item.cover_photo ? (
-                <Image source={{ uri: item.cover_photo }} style={styles.img} />
+                Platform.OS === "web" ? (
+                  // @ts-ignore — raw <img> on web for native lazy loading
+                  <img
+                    src={item.cover_photo}
+                    loading="lazy"
+                    decoding="async"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                    alt=""
+                  />
+                ) : (
+                  <Image source={{ uri: item.cover_photo }} style={styles.img} />
+                )
               ) : (
                 <View style={[styles.img, styles.imgFallback]}>
                   <Text style={styles.imgFallbackTxt}>PCS</Text>

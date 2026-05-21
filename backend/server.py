@@ -1207,7 +1207,7 @@ def _validate_video_size(b64: Optional[str]):
         raise HTTPException(status_code=413, detail="Vidéo trop volumineuse (max 20MB)")
 
 
-async def _enrich_highlight(h: dict) -> dict:
+async def _enrich_highlight(h: dict, strip_video_file: bool = False) -> dict:
     entry = await db.entries.find_one({"id": h.get("entry_id")}, {"_id": 0})
     if entry:
         h["entry"] = {
@@ -1224,6 +1224,11 @@ async def _enrich_highlight(h: dict) -> dict:
             h["cta_link"] = entry.get("ticket_link") or ""
     else:
         h["entry"] = None
+
+    # In list responses, strip the heavy base64 payload and expose a thin URL
+    # pointing to the streaming endpoint. Saves ~20MB per highlight in JSON.
+    if strip_video_file and h.get("video_file"):
+        h["video_file"] = f"/api/highlights/{h['id']}/video"
     return h
 
 
@@ -1256,9 +1261,45 @@ async def list_highlights(include_inactive: bool = False, request: Request = Non
         query["active"] = True
     items = await db.highlights.find(query, {"_id": 0}).to_list(200)
     items.sort(key=lambda h: (h.get("order") or 0, h.get("created_at") or datetime.min))
-    items = [await _enrich_highlight(h) for h in items]
+    items = [await _enrich_highlight(h, strip_video_file=True) for h in items]
     items = [h for h in items if h.get("entry")]
     return items
+
+
+@api_router.get("/highlights/{highlight_id}/video")
+async def get_highlight_video(highlight_id: str):
+    """Stream the raw video bytes for an uploaded highlight. Decodes the
+    base64 data URI stored in Mongo and serves it with the correct MIME
+    type + long-lived cache headers — the browser caches it after the
+    first request so the carousel renders quickly on subsequent visits."""
+    import base64 as _b64
+
+    h = await db.highlights.find_one(
+        {"id": highlight_id}, {"_id": 0, "video_file": 1}
+    )
+    if not h or not h.get("video_file"):
+        raise HTTPException(status_code=404, detail="Vidéo introuvable")
+    data = h["video_file"]
+    mime = "video/mp4"
+    if data.startswith("data:") and "," in data:
+        header, b64 = data.split(",", 1)
+        m = re.match(r"data:([^;]+)", header)
+        if m:
+            mime = m.group(1) or mime
+    else:
+        b64 = data
+    try:
+        raw = _b64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Vidéo illisible")
+    return Response(
+        content=raw,
+        media_type=mime,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": str(len(raw)),
+        },
+    )
 
 
 @api_router.post("/highlights")
@@ -1749,6 +1790,15 @@ async def _startup_tasks():
     logger.info("Google Calendar background sync scheduled every %ss", GCAL_SYNC_INTERVAL)
     # Bootstrap admin password from env vars (idempotent — runs on every boot)
     await _bootstrap_admin_password()
+    # Ensure performance indexes exist (idempotent — Mongo no-ops if same spec).
+    try:
+        await db.entries.create_index([("status", 1), ("date", 1)], background=True)
+        await db.entries.create_index([("type", 1), ("date", 1)], background=True)
+        await db.entries.create_index([("featured", 1), ("status", 1)], background=True)
+        await db.highlights.create_index([("active", 1), ("order", 1)], background=True)
+        logger.info("Mongo indexes ensured (entries.status_date, entries.type_date, entries.featured_status, highlights.active_order)")
+    except Exception as e:
+        logger.warning("Index creation skipped: %s", e)
 
 
 async def _bootstrap_admin_password():

@@ -349,6 +349,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#111",
     position: "relative",
+    // @ts-ignore RN-Web: force a stacking context so children z-index works
+    // reliably above embedded iframes (YouTube/Instagram/TikTok).
+    transform: [{ translateZ: 0 } as any],
+    isolation: "isolate" as any,
   },
   videoLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: "#111", zIndex: 0 },
   fallback: {
@@ -399,8 +403,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 12,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    zIndex: 2,
+    paddingTop: 22,
+    // Strong dark gradient via stacked rgba so the overlay text is readable
+    // even on top of bright video content (YouTube TV thumbnails, etc.).
+    backgroundColor: "rgba(0,0,0,0.78)",
+    zIndex: 5,
+    // @ts-ignore RN-Web: ensure it sits in its own GPU layer above iframes
+    transform: [{ translateZ: 0 } as any],
+    boxShadow: "0 -8px 20px rgba(0,0,0,0.45)" as any,
   },
   overlayInfo: { marginBottom: 8 },
   cardTitle: {
