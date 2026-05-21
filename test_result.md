@@ -1860,4 +1860,53 @@ agent_communication:
         68 — could be a typo). The endpoint is generic and accepts any size.
         For prod deployment: redeploy backend to Railway, then `curl` the
         endpoint with admin Bearer token to seed prod.
+    - agent: "main"
+      message: |
+        ## QUICK FIX — Festival card flag badge + country filter
+
+        ### 1) Flag-and-code badge instead of calendar icon
+        - New helper `/app/frontend/src/countries.ts` with `getCountryInfo()`
+          and `KNOWN_COUNTRIES`. Maps "France" → {code: "FR", flag: "🇫🇷"},
+          plus 20 other countries the PCS scrape uses (Espagne, Allemagne,
+          Portugal, Croatie, Pologne, Danemark, Grèce, Norvège, USA, UK,
+          Canada, Tunisie, Autriche, Suède, Serbie, Hongrie, Slovaquie,
+          Indonésie, Pays-Bas, Cuba). Diacritic-insensitive + English
+          aliases (Spain, Germany, etc.). Fallback `{code: "??", flag: "🌍"}`.
+        - `EntryCard.tsx`: festival type now renders a 52×56 white badge
+          with the flag emoji on top (24px) and the 2-letter ISO code below
+          (10px bold). Replaces the old yellow calendar icon.
+
+        ### 2) Country filter chips
+        - `app/(tabs)/festivals.tsx`:
+          * Added `country` state (default "all").
+          * `availableCountries` computed from current festivals (after
+            dance_style filter). Order: KNOWN_COUNTRIES that have ≥1 entry
+            in display order, then any unknowns alphabetically.
+          * Horizontal `ScrollView` row of `CountryChip`s rendered just
+            below the existing dance-style chips. Each chip shows
+            flag+label. Active chip = dark bg with yellow text.
+          * Both filters compose: `visible = upcoming.filter(country)`,
+            which itself comes from the backend already filtered by
+            dance_style.
+          * Defensive auto-reset: when a previously-selected country
+            no longer has entries (e.g. user switches to MULTI-STYLES
+            and Espagne disappears), country falls back to "all".
+
+        ### Verified
+        Playwright @ 390×844:
+        - 22 chips visible: TOUS + 21 countries with festivals.
+        - TOUS + TOUS → 68 festivals.
+        - France only → 21 festivals.
+        - France + MULTI-STYLES → 2 festivals (Tempo Latino, All Salsa).
+        - TOUS + MULTI-STYLES → 9 festivals.
+        - Country chips row narrows automatically when style filter
+          excludes some countries (CROATIE, POLOGNE shown, ESPAGNE
+          hidden under MULTI-STYLES).
+
+        Files changed:
+        - NEW /app/frontend/src/countries.ts
+        - /app/frontend/src/api.ts (added `country` to EntryItem)
+        - /app/frontend/src/EntryCard.tsx (flag badge + styles)
+        - /app/frontend/app/(tabs)/festivals.tsx (country filter logic
+          + CountryChip + chip styles)
         correctly everywhere.

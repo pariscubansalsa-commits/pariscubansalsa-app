@@ -13,6 +13,7 @@ import { COLORS, FONTS } from "./theme";
 import { EntryItem } from "./api";
 import { DanceStyleBadge } from "./DanceStyle";
 import { openExternal } from "./links";
+import { getCountryInfo } from "./countries";
 
 const MONTHS_FR = [
   "janv.", "févr.", "mars", "avril", "mai", "juin",
@@ -98,7 +99,12 @@ export default function EntryCard({
             </>
           ) : (
             <View style={styles.festivalBadge}>
-              <Ionicons name="calendar" size={18} color={COLORS.primaryText} />
+              <Text style={styles.festivalFlag}>
+                {getCountryInfo(entry.country).flag}
+              </Text>
+              <Text style={styles.festivalCode}>
+                {getCountryInfo(entry.country).code}
+              </Text>
             </View>
           )}
         </View>
@@ -248,11 +254,26 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   festivalBadge: {
-    width: 48,
-    height: 48,
-    backgroundColor: COLORS.accentYellow,
+    width: 52,
+    height: 56,
+    backgroundColor: "#FAFAFA",
+    borderWidth: 1,
+    borderColor: COLORS.primaryText,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 4,
+  },
+  festivalFlag: {
+    fontSize: 24,
+    lineHeight: 28,
+    // Emoji rendering: rely on system font, no custom family
+  },
+  festivalCode: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    color: COLORS.primaryText,
+    marginTop: 2,
   },
   content: { flex: 1 },
   overline: {

@@ -42,6 +42,7 @@ export type EntryItem = {
   time?: string;
   venue?: string;
   address?: string;
+  country?: string;
   description?: string;
   instructor?: string;
   teacher_id?: string | null;
