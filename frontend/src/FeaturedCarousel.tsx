@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 28,
     marginHorizontal: -SPACING.screen,
-    marginBottom: 20,
+    marginBottom: 4,
   },
   header: {
     flexDirection: "row",

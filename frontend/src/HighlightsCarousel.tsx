@@ -326,8 +326,8 @@ function HighlightCard({ highlight }: { highlight: Highlight }) {
 }
 
 const styles = StyleSheet.create({
-  section: { marginTop: 28, marginBottom: 8 },
-  header: { paddingHorizontal: 0, marginBottom: 14 },
+  section: { marginTop: 12, marginBottom: 4 },
+  header: { paddingHorizontal: 0, marginBottom: 12 },
   overline: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
