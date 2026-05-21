@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#111",
     position: "relative",
   },
-  videoLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: "#111" },
+  videoLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: "#111", zIndex: 0 },
   fallback: {
     flex: 1,
     alignItems: "center",
@@ -373,6 +373,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 40,
+    zIndex: 3,
   },
   partnerTxt: {
     fontFamily: FONTS.bodyBold,
@@ -390,6 +391,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 3,
   },
   overlay: {
     position: "absolute",
@@ -397,8 +399,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 12,
-    // Soft gradient via stacked rgba — RN web supports linear-gradient via style
     backgroundColor: "rgba(0,0,0,0.55)",
+    zIndex: 2,
   },
   overlayInfo: { marginBottom: 8 },
   cardTitle: {
