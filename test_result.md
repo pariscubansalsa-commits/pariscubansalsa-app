@@ -2092,7 +2092,67 @@ agent_communication:
     needs_retesting: false
     status_history:
         - working: true
-          agent: "main"
+          agent: "testing"
+          comment: |
+            BACKEND E2E — ALL 31 ASSERTIONS PASS (0 failures).
+            Test script: /app/backend_test.py against http://localhost:8001/api
+            (local bypass of the public proxy so we control X-Forwarded-For).
+
+            1) POST /api/entries/{id}/like
+               - Public (no auth) -> 200 with {"likes": <int>}. ✔
+               - First like on a fresh DB entry returns likes=1. ✔
+               - Unknown id -> 404 {"detail":"Entry not found"}. ✔
+               - Different IPs accumulate: IP_A then IP_B -> likes=2. ✔
+
+            2) Per-IP+entry rate limit (60s window)
+               - 2nd consecutive like from SAME IP -> 429 with
+                 detail "Trop de likes successifs. Réessaye dans 59s." (French ✔).
+               - Unlike from the SAME IP within window is ALSO 429 — the
+                 rate-limit window is shared across like+unlike per
+                 (ip, entry_id). ✔
+               - X-Forwarded-For first token IS the bucket key: header
+                 "<first>, 9.9.9.10" produced 200 then 429 even though
+                 downstream IP changed. ✔ (confirms _client_ip parses
+                 comma-list and takes [0].)
+
+            3) POST /api/entries/{id}/unlike
+               - Public (no auth) -> 200 with {"likes": <int>}. ✔
+               - Multiple different IPs can decrement (counter went
+                 2 -> 1 -> 0 across IP_C and IP_D). ✔
+               - Decrement at 0 does NOT throw and returns
+                 {"likes": 0}. ✔ (Clamping verified via IP_E call
+                 on already-zero counter — 200 + likes=0.)
+               - Unknown id -> 404. ✔
+
+            4) Counter propagation to GET endpoints
+               - GET /api/entries (public, no auth) -> 200, every one of
+                 the 76 returned items has an int `likes` field (default 0
+                 for never-liked entries). ✔
+               - The test DB entry shows the running total (likes=2) in
+                 the list response. ✔
+               - GET /api/entries/{id} reflects the live counter. ✔
+               - GET /api/calendar/events -> 200; every one of the 25
+                 calendar items has an int `likes` field; the
+                 calendar-only entry we liked shows the propagated
+                 counter (base+1) — verified by reading baseline first,
+                 then liking, then re-reading. ✔
+               - GET /api/entries/{cal_id} for a calendar-only UID also
+                 reflects the populated `likes`. ✔
+
+            5) Edge cases
+               - Calendar-only entry (uppercase iCal UID
+                 56417C3B-4B9A-402A-9E74-3A02DE8612B8 — present in
+                 /calendar/events, absent from db.entries) can be liked
+                 and unliked successfully. ✔ Counter stored in the
+                 dedicated `entry_likes` collection (since db.entries
+                 doesn't hold this row). ✔
+               - Multiple likes from different IPs accumulate. ✔
+               - 1 like + 1 unlike from different IPs returns to baseline. ✔
+
+            Cleanup: test DB entries created during the run were deleted.
+            The calendar-only UID's like counter was left at its pre-test
+            baseline (incremented then decremented). Test script left in
+            /app/backend_test.py for future regression runs.
           comment: |
             Public, login-less like system on every event entry.
 

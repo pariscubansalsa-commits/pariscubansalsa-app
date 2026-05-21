@@ -1137,6 +1137,7 @@ async def teacher_workshops(teacher_id: str):
     items.sort(
         key=lambda e: (0 if e.get("status") == "featured" else 1, e.get("date") or "")
     )
+    await attach_likes(items)
     return [Entry(**e) for e in items]
 
 
@@ -2087,6 +2088,7 @@ async def organisateur_entries(user: User = Depends(require_role("organisateur")
     """List the entries submitted by the current organizer (any status)."""
     items = await db.entries.find({"submitted_by": user.user_id}, {"_id": 0}).to_list(500)
     items.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    await attach_likes(items)
     return [Entry(**e) for e in items]
 
 
@@ -2222,6 +2224,7 @@ async def artiste_workshops(user: User = Depends(require_role("artiste"))):
         {"_id": 0},
     ).to_list(500)
     items.sort(key=lambda e: e.get("date") or "", reverse=True)
+    await attach_likes(items)
     return [Entry(**e) for e in items]
 
 

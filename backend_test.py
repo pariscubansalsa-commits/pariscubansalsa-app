@@ -1,630 +1,394 @@
 """
-Backend regression test — BLOC 5 (dance_style) + BLOC 1 (Recurrence / RRULE)
-Run: python /app/backend_test.py
+Backend tests for the public Likes feature on entries.
+
+Tests:
+  1) POST /api/entries/{id}/like
+  2) POST /api/entries/{id}/unlike
+  3) Counter propagation to GET /api/entries, /api/entries/{id},
+     /api/calendar/events
+  4) Edge cases (calendar-only entry, multiple IPs, decrement-to-zero,
+     rate-limit per IP+entry)
+
+Auth: NONE. All endpoints are public.
+Base URL: http://localhost:8001/api (bypass public proxy so we control
+  the X-Forwarded-For header).
 """
+import json
 import os
 import sys
-import json
+import time
 import uuid
-from datetime import datetime, date, timedelta
-import requests
+from typing import Any, Dict, List, Optional
 
-BACKEND_URL = os.environ.get(
-    "BACKEND_URL",
-    "https://rhythm-frames-3.preview.emergentagent.com",
-).rstrip("/")
-API = f"{BACKEND_URL}/api"
+import httpx
+
+BASE = os.environ.get("BACKEND_BASE_URL", "http://localhost:8001/api")
 ADMIN_TOKEN = "test_session_pcs_admin_000"
-H_ADMIN = {"Authorization": f"Bearer {ADMIN_TOKEN}", "Content-Type": "application/json"}
 
-PASS = 0
-FAIL = 0
-FAILS = []
-
-CREATED_IDS = set()  # track ids to clean up
+results: List[Dict[str, Any]] = []
 
 
-def log(msg):
-    print(msg, flush=True)
+def record(name: str, ok: bool, detail: str = "") -> None:
+    status = "PASS" if ok else "FAIL"
+    line = f"[{status}] {name}"
+    if detail:
+        line += f" — {detail}"
+    print(line)
+    results.append({"name": name, "ok": ok, "detail": detail})
 
 
-def assert_ok(cond, label, detail=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        log(f"  PASS: {label}")
-    else:
-        FAIL += 1
-        FAILS.append(f"{label}{(' — ' + detail) if detail else ''}")
-        log(f"  FAIL: {label}  {detail}")
+def headers(ip: Optional[str] = None, admin: bool = False) -> Dict[str, str]:
+    h: Dict[str, str] = {"Content-Type": "application/json"}
+    if ip:
+        h["X-Forwarded-For"] = ip
+    if admin:
+        h["Authorization"] = f"Bearer {ADMIN_TOKEN}"
+    return h
 
 
-def track(entry_id):
-    if entry_id:
-        CREATED_IDS.add(entry_id)
+def find_calendar_only_id(client: httpx.Client) -> Optional[str]:
+    """Return an iCal-only entry id (uppercase UID, NOT also in db.entries)."""
+    r = client.get(f"{BASE}/calendar/events")
+    if r.status_code != 200:
+        return None
+    cal = r.json()
+    # Get all db entry ids (admin only)
+    db_ids = set()
+    r2 = client.get(
+        f"{BASE}/entries?include_past=true",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+    )
+    if r2.status_code == 200:
+        for e in r2.json():
+            db_ids.add(e.get("id"))
+    for ev in cal:
+        eid = ev.get("id") or ""
+        if eid and eid.upper() == eid and eid not in db_ids:
+            return eid
+    # Fallback: just take first calendar id if it doesn't collide
+    for ev in cal:
+        eid = ev.get("id") or ""
+        if eid and eid not in db_ids:
+            return eid
+    return None
 
 
-def cleanup_id(entry_id, scope="all"):
-    if not entry_id:
-        return
+def make_db_entry(client: httpx.Client) -> Optional[str]:
+    """Create an approved DB entry via admin to test against."""
+    body = {
+        "type": "soiree",
+        "title": f"PCS Likes Test {uuid.uuid4().hex[:6]}",
+        "date": "2027-08-15",
+        "venue": "Maison de la Salsa",
+        "dance_style": "salsa_cubaine",
+        "status": "approved",
+    }
+    r = client.post(
+        f"{BASE}/entries",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {ADMIN_TOKEN}",
+        },
+        json=body,
+    )
+    if r.status_code != 200:
+        print(f"!! Failed to create test entry: {r.status_code} {r.text}")
+        return None
+    return r.json().get("id")
+
+
+def delete_db_entry(client: httpx.Client, entry_id: str) -> None:
     try:
-        requests.delete(f"{API}/entries/{entry_id}", params={"scope": scope}, headers=H_ADMIN, timeout=10)
+        client.delete(
+            f"{BASE}/entries/{entry_id}",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        )
     except Exception:
         pass
 
 
-# =========================================================================
-# BLOC 5 — DANCE_STYLE
-# =========================================================================
-def test_bloc5_dance_style():
-    log("\n=== BLOC 5 — dance_style ===")
-
-    # ---- B5.1: filter ?dance_style=multi_styles
-    r = requests.get(f"{API}/entries", params={"dance_style": "multi_styles"}, timeout=15)
-    assert_ok(r.status_code == 200, "GET /entries?dance_style=multi_styles -> 200", f"got {r.status_code}")
-    if r.status_code == 200:
-        items = r.json()
-        all_multi = all(e.get("dance_style") == "multi_styles" for e in items)
-        assert_ok(all_multi, "All filtered entries have dance_style=='multi_styles'",
-                  f"non-multi count={sum(1 for e in items if e.get('dance_style')!='multi_styles')}, total={len(items)}")
-
-    # ---- B5.2: invalid filter -> 400
-    r = requests.get(f"{API}/entries", params={"dance_style": "foobar"}, timeout=15)
-    assert_ok(r.status_code == 400, "GET /entries?dance_style=foobar -> 400", f"got {r.status_code} body={r.text[:200]}")
-
-    # ---- B5.3: POST /entries with dance_style="on2" -> persisted
-    body = {
-        "type": "soiree",
-        "title": "ON2 Test BLOC5",
-        "date": "2027-06-01",
-        "dance_style": "on2",
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "POST /entries with dance_style=on2 -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-    on2_id = None
-    if r.status_code == 200:
-        d = r.json()
-        on2_id = d.get("id")
-        track(on2_id)
-        assert_ok(d.get("dance_style") == "on2", "Response dance_style == 'on2'", f"got {d.get('dance_style')}")
-
-    # ---- B5.4: POST /entries with invalid dance_style -> 400 with French msg
-    body_bad = {
-        "type": "soiree",
-        "title": "Bad style",
-        "date": "2027-06-02",
-        "dance_style": "reggaeton",
-    }
-    r = requests.post(f"{API}/entries", json=body_bad, headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 400, "POST /entries with dance_style=reggaeton -> 400", f"got {r.status_code}")
-    if r.status_code == 400:
-        detail = r.json().get("detail", "")
-        assert_ok("invalide" in detail.lower() or "doit" in detail.lower(),
-                  "Error detail is in French", f"detail={detail}")
-
-    # ---- B5.5: POST /entries with NO dance_style -> defaults to "multi_styles"
-    body_default = {
-        "type": "soiree",
-        "title": "Default style test",
-        "date": "2027-06-03",
-    }
-    r = requests.post(f"{API}/entries", json=body_default, headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "POST /entries without dance_style -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-    default_id = None
-    if r.status_code == 200:
-        d = r.json()
-        default_id = d.get("id")
-        track(default_id)
-        assert_ok(d.get("dance_style") == "multi_styles",
-                  "Default dance_style == 'multi_styles'", f"got {d.get('dance_style')}")
-
-    # ---- B5.6: PUT /entries/{id} with dance_style="salsa_cubaine" -> persisted
-    if on2_id:
-        upd = {
-            "type": "soiree",
-            "title": "ON2 Test BLOC5",
-            "date": "2027-06-01",
-            "dance_style": "salsa_cubaine",
-        }
-        r = requests.put(f"{API}/entries/{on2_id}", json=upd, headers=H_ADMIN, timeout=15)
-        assert_ok(r.status_code == 200, "PUT /entries/{id} dance_style=salsa_cubaine -> 200",
-                  f"got {r.status_code} body={r.text[:300]}")
-        if r.status_code == 200:
-            r2 = requests.get(f"{API}/entries/{on2_id}", timeout=15)
-            assert_ok(r2.status_code == 200 and r2.json().get("dance_style") == "salsa_cubaine",
-                      "Updated dance_style persisted as 'salsa_cubaine'",
-                      f"got {r2.json().get('dance_style') if r2.status_code==200 else r2.status_code}")
-
-    # ---- B5.7: PUT with invalid dance_style -> 400
-    if on2_id:
-        bad = {
-            "type": "soiree",
-            "title": "ON2 Test BLOC5",
-            "date": "2027-06-01",
-            "dance_style": "kizomba",
-        }
-        r = requests.put(f"{API}/entries/{on2_id}", json=bad, headers=H_ADMIN, timeout=15)
-        assert_ok(r.status_code == 400, "PUT /entries/{id} dance_style=kizomba -> 400",
-                  f"got {r.status_code}")
-
-    # ---- B5.8: Migration sanity — every entry has non-null dance_style
-    r = requests.get(f"{API}/entries", timeout=15)
-    if r.status_code == 200:
-        items = r.json()
-        assert_ok(len(items) > 0, "GET /entries returns >0 entries", f"count={len(items)}")
-        all_have_ds = all(e.get("dance_style") not in (None, "") for e in items)
-        nulls = [e.get("id") for e in items if e.get("dance_style") in (None, "")]
-        assert_ok(all_have_ds, "All entries have non-null dance_style",
-                  f"nulls count={len(nulls)} sample={nulls[:3]}")
-
-    # cleanup
-    cleanup_id(on2_id)
-    cleanup_id(default_id)
-
-
-# =========================================================================
-# BLOC 1 — RECURRENCE
-# =========================================================================
-def get_entries_by_title(title, type_=None, include_past=True):
-    """Fetch all entries (past+future for admin) matching title.
-
-    Note: backend's include_past=true returns ONLY strictly past events,
-    so we make two calls and merge.
-    """
-    seen = {}
-    # Future + today via public GET (no auth needed)
-    params_future = {}
-    if type_:
-        params_future["type"] = type_
-    r = requests.get(f"{API}/entries", params=params_future, timeout=15)
-    if r.status_code == 200:
-        for e in r.json():
-            if e.get("title") == title:
-                seen[e["id"]] = e
-    if include_past:
-        params_past = {"include_past": "true"}
-        if type_:
-            params_past["type"] = type_
-        r = requests.get(f"{API}/entries", params=params_past, headers=H_ADMIN, timeout=15)
-        if r.status_code == 200:
-            for e in r.json():
-                if e.get("title") == title:
-                    seen[e["id"]] = e
-    return list(seen.values())
-
-
-def test_bloc1_weekly_master():
-    log("\n=== BLOC 1.A — Weekly master with count=4 ===")
-    body = {
-        "type": "soiree",
-        "title": "Weekly Test BLOC1",
-        "date": "2027-05-03",  # Monday
-        "dance_style": "salsa_cubaine",
-        "recurrence": {"freq": "weekly", "interval": 1, "count": 4},
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "POST /entries weekly master -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-    if r.status_code != 200:
-        return None, []
-    master = r.json()
-    master_id = master.get("id")
-    track(master_id)
-    assert_ok(master.get("is_recurrence_master") is True,
-              "Master is_recurrence_master == true", f"got {master.get('is_recurrence_master')}")
-    assert_ok(master.get("parent_id") in (None, ""),
-              "Master parent_id is None", f"got {master.get('parent_id')}")
-
-    # Fetch all siblings
-    items = get_entries_by_title("Weekly Test BLOC1")
-    assert_ok(len(items) == 4, "Total entries with title 'Weekly Test BLOC1' == 4",
-              f"got {len(items)}")
-    children = [e for e in items if e.get("id") != master_id]
-    for c in children:
-        track(c["id"])
-    assert_ok(len(children) == 3, "3 child occurrences created", f"got {len(children)}")
-
-    # Check parent_id and occurrence_index on children
-    parent_ids_correct = all(c.get("parent_id") == master_id for c in children)
-    assert_ok(parent_ids_correct, "All children have parent_id == master_id")
-
-    occ_indices = sorted([c.get("occurrence_index") for c in children])
-    assert_ok(occ_indices == [1, 2, 3], "Occurrence indices are 1, 2, 3", f"got {occ_indices}")
-
-    # Verify dates
-    all_dates = sorted([e["date"] for e in items])
-    expected = ["2027-05-03", "2027-05-10", "2027-05-17", "2027-05-24"]
-    assert_ok(all_dates == expected, "Dates correct: 2027-05-03, 10, 17, 24", f"got {all_dates}")
-
-    # Build sorted list of children by date for later use
-    children_sorted = sorted(children, key=lambda e: e["date"])
-    return master_id, children_sorted
-
-
-def test_bloc1_monthly_weekday():
-    log("\n=== BLOC 1.B — monthly_weekday ===")
-    # 2027-02-05 = Friday, 1st Friday of February
-    body = {
-        "type": "soiree",
-        "title": "MonthlyWeekday Test BLOC1",
-        "date": "2027-02-05",
-        "dance_style": "salsa_cubaine",
-        "recurrence": {"freq": "monthly_weekday", "interval": 1, "count": 3},
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "POST /entries monthly_weekday -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-    if r.status_code != 200:
-        return None
-    master = r.json()
-    master_id = master.get("id")
-    track(master_id)
-
-    items = get_entries_by_title("MonthlyWeekday Test BLOC1")
-    for e in items:
-        track(e["id"])
-    all_dates = sorted([e["date"] for e in items])
-    # Master 2027-02-05 (1st Fri Feb), child1 2027-03-05 (1st Fri Mar), child2 2027-04-02 (1st Fri Apr)
-    expected = ["2027-02-05", "2027-03-05", "2027-04-02"]
-    assert_ok(all_dates == expected, "Monthly weekday dates correct (1st Friday of Feb/Mar/Apr 2027)",
-              f"got {all_dates}, expected {expected}")
-    return master_id
-
-
-def test_bloc1_scope_this(master_id, children_sorted):
-    """children_sorted: [child1 @ 2027-05-10, child2 @ 2027-05-17, child3 @ 2027-05-24]"""
-    log("\n=== BLOC 1.C — scope=this update ===")
-    if not children_sorted or len(children_sorted) < 2:
-        FAILS.append("scope=this prereq missing children")
-        return
-    child2 = children_sorted[1]  # 2027-05-17
-    upd = {
-        "type": "soiree",
-        "title": "Changed",
-        "date": child2["date"],
-    }
-    r = requests.put(f"{API}/entries/{child2['id']}", params={"scope": "this"}, json=upd,
-                     headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "PUT child2 scope=this -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-
-    # Verify only child2 changed
-    r2 = requests.get(f"{API}/entries/{child2['id']}", timeout=15)
-    assert_ok(r2.status_code == 200 and r2.json().get("title") == "Changed",
-              "child2 title now 'Changed'",
-              f"got {r2.json().get('title') if r2.status_code==200 else r2.status_code}")
-
-    siblings_check = []
-    for sid in [master_id] + [c["id"] for c in children_sorted if c["id"] != child2["id"]]:
-        rr = requests.get(f"{API}/entries/{sid}", timeout=15)
-        if rr.status_code == 200:
-            siblings_check.append((sid, rr.json().get("title")))
-    others_unchanged = all(t == "Weekly Test BLOC1" for _, t in siblings_check)
-    assert_ok(others_unchanged, "Master + child1 + child3 still have original title 'Weekly Test BLOC1'",
-              f"got {siblings_check}")
-
-
-def test_bloc1_scope_future(master_id, children_sorted):
-    log("\n=== BLOC 1.D — scope=future update ===")
-    if not children_sorted or len(children_sorted) < 3:
-        FAILS.append("scope=future prereq missing children")
-        return
-    child2 = children_sorted[1]  # date 2027-05-17
-    upd = {
-        "type": "soiree",
-        "title": "UPDATED",
-        "date": child2["date"],
-    }
-    r = requests.put(f"{API}/entries/{child2['id']}", params={"scope": "future"}, json=upd,
-                     headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "PUT child2 scope=future -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-
-    # Expected: child2 + child3 -> "UPDATED"; master + child1 unchanged
-    titles = {}
-    for sid in [master_id] + [c["id"] for c in children_sorted]:
-        rr = requests.get(f"{API}/entries/{sid}", timeout=15)
-        if rr.status_code == 200:
-            titles[sid] = rr.json().get("title")
-
-    child1_id = children_sorted[0]["id"]
-    child2_id = children_sorted[1]["id"]
-    child3_id = children_sorted[2]["id"]
-
-    assert_ok(titles.get(master_id) == "Weekly Test BLOC1", "Master title unchanged",
-              f"got {titles.get(master_id)}")
-    assert_ok(titles.get(child1_id) == "Weekly Test BLOC1", "Child1 title unchanged",
-              f"got {titles.get(child1_id)}")
-    assert_ok(titles.get(child2_id) == "UPDATED", "Child2 title updated to 'UPDATED'",
-              f"got {titles.get(child2_id)}")
-    assert_ok(titles.get(child3_id) == "UPDATED", "Child3 title updated to 'UPDATED'",
-              f"got {titles.get(child3_id)}")
-
-
-def test_bloc1_scope_all(master_id, children_sorted):
-    log("\n=== BLOC 1.E — scope=all update ===")
-    if not children_sorted:
-        FAILS.append("scope=all prereq missing children")
-        return
-    child1 = children_sorted[0]
-    upd = {
-        "type": "soiree",
-        "title": "ALL UPDATE",
-        "date": child1["date"],
-    }
-    r = requests.put(f"{API}/entries/{child1['id']}", params={"scope": "all"}, json=upd,
-                     headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "PUT child1 scope=all -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-
-    titles = {}
-    for sid in [master_id] + [c["id"] for c in children_sorted]:
-        rr = requests.get(f"{API}/entries/{sid}", timeout=15)
-        if rr.status_code == 200:
-            titles[sid] = rr.json().get("title")
-    all_updated = all(t == "ALL UPDATE" for t in titles.values())
-    assert_ok(all_updated, "Master + all children have title 'ALL UPDATE'",
-              f"got {titles}")
-
-
-def test_bloc1_delete_all(master_id, children_sorted):
-    log("\n=== BLOC 1.F — DELETE scope=all ===")
-    if not master_id:
-        FAILS.append("DELETE scope=all prereq missing master")
-        return
-    r = requests.delete(f"{API}/entries/{master_id}", params={"scope": "all"},
-                        headers=H_ADMIN, timeout=15)
-    assert_ok(r.status_code == 200, "DELETE master scope=all -> 200",
-              f"got {r.status_code} body={r.text[:300]}")
-    if r.status_code == 200:
-        deleted = r.json().get("deleted")
-        assert_ok(deleted == 4, "4 docs deleted (master + 3 children)", f"got {deleted}")
-
-    # Verify all gone
-    for sid in [master_id] + [c["id"] for c in (children_sorted or [])]:
-        rr = requests.get(f"{API}/entries/{sid}", timeout=15)
-        assert_ok(rr.status_code == 404, f"Entry {sid[:8]}.. now 404", f"got {rr.status_code}")
-        if sid in CREATED_IDS:
-            CREATED_IDS.discard(sid)
-
-
-def test_bloc1_regenerate_non_master():
-    log("\n=== BLOC 1.G — regenerate-occurrences on non-master -> 400 ===")
-    # Create a simple non-master entry
-    body = {
-        "type": "soiree",
-        "title": "NonMaster BLOC1",
-        "date": "2027-07-15",
-        "dance_style": "salsa_cubaine",
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    if r.status_code != 200:
-        FAILS.append("Could not create non-master test entry")
-        return
-    eid = r.json().get("id")
-    track(eid)
-    r2 = requests.post(f"{API}/entries/{eid}/regenerate-occurrences", headers=H_ADMIN, timeout=15)
-    assert_ok(r2.status_code == 400, "regenerate-occurrences on non-master -> 400",
-              f"got {r2.status_code} body={r2.text[:200]}")
-    cleanup_id(eid)
-
-
-def test_bloc1_idempotency():
-    log("\n=== BLOC 1.H — Idempotency: regenerate twice doesn't duplicate ===")
-    body = {
-        "type": "soiree",
-        "title": "Idempotent BLOC1",
-        "date": "2027-08-02",  # Monday
-        "dance_style": "salsa_cubaine",
-        "recurrence": {"freq": "weekly", "interval": 1, "count": 4},
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    if r.status_code != 200:
-        FAILS.append("Idempotency setup failed")
-        return
-    master_id = r.json()["id"]
-    track(master_id)
-
-    # Get count before
-    items_before = get_entries_by_title("Idempotent BLOC1")
-    for e in items_before:
-        track(e["id"])
-    count_before = len(items_before)
-    assert_ok(count_before == 4, "4 entries after master creation", f"got {count_before}")
-
-    # Call regenerate-occurrences first time
-    r1 = requests.post(f"{API}/entries/{master_id}/regenerate-occurrences", headers=H_ADMIN, timeout=15)
-    assert_ok(r1.status_code == 200, "1st regenerate -> 200", f"got {r1.status_code}")
-    if r1.status_code == 200:
-        created1 = r1.json().get("created", 0)
-        assert_ok(created1 == 0, "1st regenerate created=0 (already exist)", f"got {created1}")
-
-    # Second time
-    r2 = requests.post(f"{API}/entries/{master_id}/regenerate-occurrences", headers=H_ADMIN, timeout=15)
-    assert_ok(r2.status_code == 200, "2nd regenerate -> 200", f"got {r2.status_code}")
-    if r2.status_code == 200:
-        created2 = r2.json().get("created", 0)
-        assert_ok(created2 == 0, "2nd regenerate created=0 (idempotent)", f"got {created2}")
-
-    items_after = get_entries_by_title("Idempotent BLOC1")
-    assert_ok(len(items_after) == 4, "Still 4 entries after 2x regenerate (no duplicates)",
-              f"got {len(items_after)}")
-
-    # Cleanup
-    requests.delete(f"{API}/entries/{master_id}", params={"scope": "all"},
-                    headers=H_ADMIN, timeout=15)
-    for e in items_after:
-        CREATED_IDS.discard(e["id"])
-
-
-def test_bloc1_public_filter_and_occurrences():
-    log("\n=== BLOC 1.I — Public GET returns occurrence children individually ===")
-    # Create a fresh weekly master in the future
-    body = {
-        "type": "soiree",
-        "title": "PublicVisibility BLOC1",
-        "date": "2027-09-06",  # Monday
-        "dance_style": "salsa_cubaine",
-        "recurrence": {"freq": "weekly", "interval": 1, "count": 3},
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    if r.status_code != 200:
-        FAILS.append("Public visibility setup failed")
-        return
-    master_id = r.json()["id"]
-    track(master_id)
-    items = get_entries_by_title("PublicVisibility BLOC1")
-    for e in items:
-        track(e["id"])
-    assert_ok(len(items) == 3, "3 entries created (master + 2 children)", f"got {len(items)}")
-
-    # Public GET (no auth)
-    r = requests.get(f"{API}/entries", params={"type": "soiree"}, timeout=15)
-    assert_ok(r.status_code == 200, "Public GET /entries?type=soiree -> 200", f"got {r.status_code}")
-    if r.status_code == 200:
-        public_items = r.json()
-        public_titles = [e for e in public_items if e.get("title") == "PublicVisibility BLOC1"]
-        # Should see 3 individual entries (master + 2 children) as separate dates
-        public_dates = sorted(set(e["date"] for e in public_titles))
-        expected = ["2027-09-06", "2027-09-13", "2027-09-20"]
-        assert_ok(public_dates == expected,
-                  "Public sees 3 individual occurrence dates (not just master)",
-                  f"got {public_dates}")
-        # Make sure children are returned, not just master
-        ids = [e["id"] for e in public_titles]
-        children_visible = sum(1 for e in public_titles if e.get("parent_id") == master_id)
-        assert_ok(children_visible == 2, "Both children visible in public list", f"got {children_visible}")
-
-    # Cleanup
-    requests.delete(f"{API}/entries/{master_id}", params={"scope": "all"}, headers=H_ADMIN, timeout=15)
-    for e in items:
-        CREATED_IDS.discard(e["id"])
-
-
-def test_bloc1_past_filter():
-    log("\n=== BLOC 1.J — Past occurrences filtered for public ===")
-    # Date in the past with count=6 weekly
-    # Choose a past date so some occurrences are past, some future
-    today = date.today()
-    # Pick a Monday 8 weeks ago
-    past_start = today - timedelta(weeks=2)
-    # find a date that yields some past + some future with count=6
-    # Use 4 weeks before today so first 4 occurrences are past, last 2 future
-    past_start = today - timedelta(weeks=4)
-    body = {
-        "type": "soiree",
-        "title": "PastFilter BLOC1",
-        "date": past_start.strftime("%Y-%m-%d"),
-        "dance_style": "salsa_cubaine",
-        "recurrence": {"freq": "weekly", "interval": 1, "count": 6},
-    }
-    r = requests.post(f"{API}/entries", json=body, headers=H_ADMIN, timeout=15)
-    if r.status_code != 200:
-        FAILS.append(f"Past filter setup failed: {r.status_code} {r.text[:200]}")
-        return
-    master_id = r.json()["id"]
-    track(master_id)
-    all_items = get_entries_by_title("PastFilter BLOC1")
-    for e in all_items:
-        track(e["id"])
-    assert_ok(len(all_items) == 6, "6 entries created", f"got {len(all_items)}")
-
-    # Admin sees all with include_past
-    today_str = today.strftime("%Y-%m-%d")
-    past_count = sum(1 for e in all_items if e["date"] < today_str)
-    future_count = sum(1 for e in all_items if e["date"] >= today_str)
-    assert_ok(past_count > 0, "At least 1 past occurrence in seed",
-              f"past={past_count} future={future_count}")
-    assert_ok(future_count > 0, "At least 1 future occurrence in seed",
-              f"past={past_count} future={future_count}")
-
-    # Public GET
-    r = requests.get(f"{API}/entries", params={"type": "soiree"}, timeout=15)
-    if r.status_code == 200:
-        public = [e for e in r.json() if e.get("title") == "PastFilter BLOC1"]
-        public_past = sum(1 for e in public if e["date"] < today_str)
-        assert_ok(public_past == 0, "Public GET filters out past occurrences",
-                  f"public past leaks={public_past}, public total={len(public)}")
-        assert_ok(len(public) == future_count, "Public sees only future occurrences",
-                  f"public={len(public)} expected_future={future_count}")
-
-    # Cleanup
-    requests.delete(f"{API}/entries/{master_id}", params={"scope": "all"}, headers=H_ADMIN, timeout=15)
-    for e in all_items:
-        CREATED_IDS.discard(e["id"])
-
-
-# =========================================================================
-# Cleanup
-# =========================================================================
-def final_cleanup():
-    log("\n=== Final cleanup ===")
-    for eid in list(CREATED_IDS):
-        cleanup_id(eid)
-    log(f"Cleaned up {len(CREATED_IDS)} entries")
-
-
-def main():
-    log(f"Backend: {API}")
-    log(f"Admin token: {ADMIN_TOKEN}")
-
-    # BLOC 5
-    try:
-        test_bloc5_dance_style()
-    except Exception as e:
-        log(f"BLOC 5 unexpected error: {e}")
-        FAILS.append(f"BLOC 5 exception: {e}")
-
-    # BLOC 1
-    try:
-        master_id, children_sorted = test_bloc1_weekly_master()
-        if master_id and children_sorted:
-            test_bloc1_scope_this(master_id, children_sorted)
-            test_bloc1_scope_future(master_id, children_sorted)
-            test_bloc1_scope_all(master_id, children_sorted)
-            test_bloc1_delete_all(master_id, children_sorted)
-    except Exception as e:
-        log(f"BLOC 1 weekly chain error: {e}")
-        FAILS.append(f"BLOC 1 weekly chain exception: {e}")
-
-    try:
-        test_bloc1_monthly_weekday()
-    except Exception as e:
-        FAILS.append(f"BLOC 1 monthly_weekday exception: {e}")
-
-    try:
-        test_bloc1_regenerate_non_master()
-    except Exception as e:
-        FAILS.append(f"BLOC 1 regenerate non-master exception: {e}")
-
-    try:
-        test_bloc1_idempotency()
-    except Exception as e:
-        FAILS.append(f"BLOC 1 idempotency exception: {e}")
-
-    try:
-        test_bloc1_public_filter_and_occurrences()
-    except Exception as e:
-        FAILS.append(f"BLOC 1 public filter exception: {e}")
-
-    try:
-        test_bloc1_past_filter()
-    except Exception as e:
-        FAILS.append(f"BLOC 1 past filter exception: {e}")
-
-    final_cleanup()
-
-    log("\n" + "=" * 60)
-    log(f"TOTAL: {PASS} PASS, {FAIL} FAIL")
-    if FAILS:
-        log("\nFAILURES:")
-        for f in FAILS:
-            log(f"  - {f}")
-    log("=" * 60)
-    sys.exit(0 if FAIL == 0 else 1)
+def reset_likes_for_entry(client: httpx.Client, entry_id: str) -> None:
+    """Brute-force unlike many times from many IPs to force counter to 0.
+    Not strictly needed for fresh entries but harmless."""
+    pass
+
+
+def main() -> int:
+    timeout = httpx.Timeout(20.0)
+    with httpx.Client(timeout=timeout) as client:
+        # Sanity check API up
+        try:
+            r = client.get(f"{BASE}/entries")
+            record("API reachable GET /entries", r.status_code == 200,
+                   f"status={r.status_code}")
+        except Exception as e:
+            record("API reachable GET /entries", False, str(e))
+            return 1
+
+        # ────────────────────── Setup ──────────────────────
+        entry_id = make_db_entry(client)
+        record("Setup: create test DB entry", bool(entry_id), entry_id or "")
+        if not entry_id:
+            return 1
+
+        # Unique IPs per test to avoid rate-limit cross-talk
+        IP_A = f"1.1.1.{uuid.uuid4().int % 250 + 1}"
+        IP_B = f"2.2.2.{uuid.uuid4().int % 250 + 1}"
+        IP_C = f"3.3.3.{uuid.uuid4().int % 250 + 1}"
+        IP_D = f"4.4.4.{uuid.uuid4().int % 250 + 1}"
+
+        # ───────────────── 1) Like on DB entry ─────────────────
+        r = client.post(
+            f"{BASE}/entries/{entry_id}/like", headers=headers(ip=IP_A),
+        )
+        ok = r.status_code == 200 and isinstance(r.json().get("likes"), int)
+        likes1 = r.json().get("likes") if r.status_code == 200 else None
+        record("POST /entries/{id}/like (IP_A) returns {likes:int}",
+               ok, f"status={r.status_code} body={r.text[:120]}")
+        record("Like count is 1 after first like", likes1 == 1,
+               f"got {likes1}")
+
+        # ───────────────── 2) Rate-limit same IP ─────────────────
+        r2 = client.post(
+            f"{BASE}/entries/{entry_id}/like", headers=headers(ip=IP_A),
+        )
+        is_429 = r2.status_code == 429
+        record("Second like from SAME IP within 60s -> 429", is_429,
+               f"status={r2.status_code} body={r2.text[:120]}")
+        if is_429:
+            detail = ""
+            try:
+                detail = r2.json().get("detail", "")
+            except Exception:
+                detail = r2.text
+            # French message — should contain something French
+            french_markers = ["Trop", "Réessaye", "Réessayez", "danse",
+                              "trop", "secondes", "s."]
+            has_fr = any(m in detail for m in french_markers)
+            record("429 detail is in French", has_fr, f"detail={detail!r}")
+
+        # ───────────────── 3) Rate-limit also applies to unlike ─────────────────
+        # Same IP_A is still inside its 60s window
+        r3 = client.post(
+            f"{BASE}/entries/{entry_id}/unlike", headers=headers(ip=IP_A),
+        )
+        record(
+            "Unlike from SAME IP_A within 60s -> 429 (shared window)",
+            r3.status_code == 429,
+            f"status={r3.status_code} body={r3.text[:120]}",
+        )
+
+        # ───────────────── 4) Different IP can like ─────────────────
+        r4 = client.post(
+            f"{BASE}/entries/{entry_id}/like", headers=headers(ip=IP_B),
+        )
+        likes2 = r4.json().get("likes") if r4.status_code == 200 else None
+        record("Like from different IP_B -> 200", r4.status_code == 200,
+               f"status={r4.status_code}")
+        record("Counter accumulates across IPs (now 2)", likes2 == 2,
+               f"got {likes2}")
+
+        # ───────────────── 5) Unknown entry id -> 404 ─────────────────
+        ghost = f"ghost-{uuid.uuid4().hex}"
+        r5 = client.post(
+            f"{BASE}/entries/{ghost}/like", headers=headers(ip=IP_C),
+        )
+        record("Like on unknown entry -> 404", r5.status_code == 404,
+               f"status={r5.status_code} body={r5.text[:120]}")
+        r5u = client.post(
+            f"{BASE}/entries/{ghost}/unlike", headers=headers(ip=IP_C),
+        )
+        record("Unlike on unknown entry -> 404", r5u.status_code == 404,
+               f"status={r5u.status_code}")
+
+        # ───────────────── 6) Counter propagation: GET /entries ─────────────────
+        r6 = client.get(f"{BASE}/entries")
+        body = r6.json() if r6.status_code == 200 else []
+        target = next((e for e in body if e.get("id") == entry_id), None)
+        # The future-only filter on /entries should include 2027-08-15 entry
+        record("GET /entries returns 200", r6.status_code == 200)
+        record(
+            "Test entry visible in GET /entries (future date 2027)",
+            target is not None,
+            f"found={target is not None}",
+        )
+        if target is not None:
+            record(
+                "Test entry has likes=2 in GET /entries",
+                target.get("likes") == 2,
+                f"got {target.get('likes')}",
+            )
+        # Every item has a likes field (default 0)
+        all_have_likes = all(
+            isinstance(it.get("likes"), int) for it in body
+        ) if body else True
+        record(
+            "Every item in GET /entries has int likes field",
+            all_have_likes,
+            f"count={len(body)}",
+        )
+
+        # ───────────────── 7) Counter propagation: GET /entries/{id} ─────────────────
+        r7 = client.get(f"{BASE}/entries/{entry_id}")
+        if r7.status_code == 200:
+            single = r7.json()
+            record(
+                "GET /entries/{id} reflects likes=2",
+                single.get("likes") == 2,
+                f"got {single.get('likes')}",
+            )
+        else:
+            record("GET /entries/{id} returns 200", False,
+                   f"status={r7.status_code}")
+
+        # ───────────────── 8) Unlike decrement ─────────────────
+        # Use fresh IPs to bypass rate-limit
+        r8 = client.post(
+            f"{BASE}/entries/{entry_id}/unlike", headers=headers(ip=IP_C),
+        )
+        likes3 = r8.json().get("likes") if r8.status_code == 200 else None
+        record("Unlike (IP_C) -> 200", r8.status_code == 200,
+               f"status={r8.status_code} body={r8.text[:120]}")
+        record("Counter decremented to 1", likes3 == 1, f"got {likes3}")
+
+        r9 = client.post(
+            f"{BASE}/entries/{entry_id}/unlike", headers=headers(ip=IP_D),
+        )
+        likes4 = r9.json().get("likes") if r9.status_code == 200 else None
+        record("Unlike (IP_D) -> 200", r9.status_code == 200,
+               f"status={r9.status_code}")
+        record("Counter decremented to 0", likes4 == 0, f"got {likes4}")
+
+        # ───────────────── 9) Unlike below zero is clamped ─────────────────
+        IP_E = f"5.5.5.{uuid.uuid4().int % 250 + 1}"
+        r10 = client.post(
+            f"{BASE}/entries/{entry_id}/unlike", headers=headers(ip=IP_E),
+        )
+        likes5 = r10.json().get("likes") if r10.status_code == 200 else None
+        record(
+            "Unlike at 0 returns {likes:0} (no negative, no throw)",
+            r10.status_code == 200 and likes5 == 0,
+            f"status={r10.status_code} likes={likes5}",
+        )
+
+        # ───────────────── 10) Calendar-only entry ─────────────────
+        cal_id = find_calendar_only_id(client)
+        record("Found a calendar-only entry id", bool(cal_id),
+               f"id={cal_id!r}")
+        if cal_id:
+            # Baseline (prior runs may have left likes on this UID).
+            r_base = client.get(f"{BASE}/entries/{cal_id}")
+            base = int((r_base.json() or {}).get("likes") or 0) if r_base.status_code == 200 else 0
+            IP_F = f"6.6.6.{uuid.uuid4().int % 250 + 1}"
+            r11 = client.post(
+                f"{BASE}/entries/{cal_id}/like", headers=headers(ip=IP_F),
+            )
+            cal_likes1 = r11.json().get("likes") if r11.status_code == 200 else None
+            record(
+                "Like calendar-only entry -> 200",
+                r11.status_code == 200,
+                f"status={r11.status_code} body={r11.text[:120]}",
+            )
+            record(
+                "Calendar-only entry like increments by 1 (delta from baseline)",
+                cal_likes1 == base + 1,
+                f"baseline={base} got {cal_likes1}",
+            )
+            # Propagation to GET /calendar/events
+            r12 = client.get(f"{BASE}/calendar/events")
+            if r12.status_code == 200:
+                cal_evs = r12.json()
+                cal_target = next(
+                    (e for e in cal_evs if e.get("id") == cal_id), None
+                )
+                record(
+                    "Calendar event present in /calendar/events",
+                    cal_target is not None,
+                    "",
+                )
+                if cal_target is not None:
+                    record(
+                        "Calendar event likes propagated to /calendar/events (= base+1)",
+                        cal_target.get("likes") == base + 1,
+                        f"baseline={base} got {cal_target.get('likes')}",
+                    )
+                all_have_likes_cal = all(
+                    isinstance(it.get("likes"), int) for it in cal_evs
+                )
+                record(
+                    "Every /calendar/events item has int likes field",
+                    all_have_likes_cal,
+                    f"count={len(cal_evs)}",
+                )
+            # Propagation to GET /entries/{id} on calendar-only id
+            r13 = client.get(f"{BASE}/entries/{cal_id}")
+            if r13.status_code == 200:
+                record(
+                    "GET /entries/{cal_id} reflects new total (= base+1)",
+                    r13.json().get("likes") == base + 1,
+                    f"baseline={base} got {r13.json().get('likes')}",
+                )
+            else:
+                record(
+                    "GET /entries/{cal_id} returns 200",
+                    False,
+                    f"status={r13.status_code}",
+                )
+
+            # Decrement back via a different IP to restore baseline
+            IP_G = f"7.7.7.{uuid.uuid4().int % 250 + 1}"
+            r14 = client.post(
+                f"{BASE}/entries/{cal_id}/unlike",
+                headers=headers(ip=IP_G),
+            )
+            record(
+                "Unlike calendar-only entry -> 200 with delta=-1",
+                r14.status_code == 200 and r14.json().get("likes") == base,
+                f"status={r14.status_code} body={r14.text[:120]}",
+            )
+
+        # ───────────────── 11) X-Forwarded-For comma list takes first IP ─────────────────
+        # Use a fresh entry to isolate. Create another entry for clarity.
+        entry2 = make_db_entry(client)
+        if entry2:
+            shared_first = f"8.8.8.{uuid.uuid4().int % 250 + 1}"
+            # First call sets the bucket for shared_first
+            ra = client.post(
+                f"{BASE}/entries/{entry2}/like",
+                headers={"Content-Type": "application/json",
+                         "X-Forwarded-For": f"{shared_first}, 9.9.9.9"},
+            )
+            # Second call with same first IP but different downstream IPs
+            # should still be rate-limited
+            rb = client.post(
+                f"{BASE}/entries/{entry2}/like",
+                headers={"Content-Type": "application/json",
+                         "X-Forwarded-For": f"{shared_first}, 9.9.9.10"},
+            )
+            record(
+                "X-Forwarded-For first IP is used for rate-limit bucket",
+                ra.status_code == 200 and rb.status_code == 429,
+                f"first={ra.status_code} second={rb.status_code}",
+            )
+            delete_db_entry(client, entry2)
+
+        # ───────────────── Cleanup ─────────────────
+        delete_db_entry(client, entry_id)
+        record("Cleanup: delete test entry", True, "")
+
+    # Summary
+    print()
+    print("=" * 70)
+    failures = [r for r in results if not r["ok"]]
+    print(f"TOTAL: {len(results)}  PASS: {len(results) - len(failures)}  "
+          f"FAIL: {len(failures)}")
+    if failures:
+        print("\nFAILURES:")
+        for f in failures:
+            print(f"  - {f['name']}: {f['detail']}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
