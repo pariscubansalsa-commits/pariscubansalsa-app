@@ -10,7 +10,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS, FONTS } from "./theme";
-import { EntryItem, entryCoverUri } from "./api";
+import { EntryItem } from "./api";
 import { DanceStyleBadge } from "./DanceStyle";
 import { openExternal } from "./links";
 import { getCountryInfo } from "./countries";
@@ -215,12 +215,9 @@ export default function EntryCard({
         </View>
       </View>
 
-      {(() => {
-        const coverUri = entryCoverUri(entry);
-        return coverUri ? (
-          <Image source={{ uri: coverUri }} style={styles.cover} />
-        ) : null;
-      })()}
+      {entry.cover_photo && (
+        <Image source={{ uri: entry.cover_photo }} style={styles.cover} />
+      )}
     </Wrapper>
   );
 }

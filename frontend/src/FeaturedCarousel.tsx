@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api, EntryItem, entryCoverUri } from "./api";
+import { api, EntryItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { formatDateFR } from "./EntryCard";
 import { openExternal } from "./links";
@@ -101,19 +101,11 @@ export default function FeaturedCarousel() {
               activeOpacity={0.9}
               onPress={() => router.push(`/entry/${item.id}` as any)}
             >
-              {(() => {
-                const coverUri = entryCoverUri(item);
-                if (!coverUri) {
-                  return (
-                    <View style={[styles.img, styles.imgFallback]}>
-                      <Text style={styles.imgFallbackTxt}>PCS</Text>
-                    </View>
-                  );
-                }
-                return Platform.OS === "web" ? (
+              {item.cover_photo ? (
+                Platform.OS === "web" ? (
                   // @ts-ignore — raw <img> on web for native lazy loading
                   <img
-                    src={coverUri}
+                    src={item.cover_photo}
                     loading="lazy"
                     decoding="async"
                     style={{
@@ -124,9 +116,13 @@ export default function FeaturedCarousel() {
                     alt=""
                   />
                 ) : (
-                  <Image source={{ uri: coverUri }} style={styles.img} />
-                );
-              })()}
+                  <Image source={{ uri: item.cover_photo }} style={styles.img} />
+                )
+              ) : (
+                <View style={[styles.img, styles.imgFallback]}>
+                  <Text style={styles.imgFallbackTxt}>PCS</Text>
+                </View>
+              )}
               <View style={styles.gradient} />
               <View style={styles.dateBadge}>
                 <Text style={styles.dateDay}>{day}</Text>
