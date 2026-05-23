@@ -7,6 +7,25 @@ const fromEnv =
 export const BACKEND_URL = fromEnv;
 export const API = `${BACKEND_URL}/api`;
 
+/**
+ * Returns a usable image URL for an entry's cover photo:
+ * - If the backend ships a `cover_photo` (detail endpoint or legacy data),
+ *   use it directly (handles `data:` URIs and remote https URLs).
+ * - Else if the entry has `has_cover: true` (list endpoint), build the
+ *   streaming URL `/api/entries/{id}/cover` which the backend either
+ *   decodes from base64 or 302-redirects to the upstream image URL.
+ * - Else return null — caller can render a placeholder.
+ */
+export function entryCoverUri(entry: {
+  id: string;
+  cover_photo?: string | null;
+  has_cover?: boolean | null;
+}): string | null {
+  if (entry.cover_photo) return entry.cover_photo;
+  if (entry.has_cover) return `${API}/entries/${entry.id}/cover`;
+  return null;
+}
+
 export type EventItem = {
   id: string;
   name: string;
@@ -63,6 +82,7 @@ export type EntryItem = {
   instagram_post?: string;
   is_mensuelle?: boolean;
   cover_photo?: string | null;
+  has_cover?: boolean | null;
   featured?: boolean;
   status?: "pending" | "approved" | "featured" | "rejected";
   submitter_name?: string;

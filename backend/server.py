@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, BackgroundTasks
+from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -146,6 +147,10 @@ class Entry(BaseModel):
     is_recurrence_master: bool = False
     occurrence_index: Optional[int] = None  # 0, 1, 2… for each child
     cover_photo: Optional[str] = None
+    has_cover: Optional[bool] = None  # set on LIST responses so the frontend
+                                       # can lazy-load the image via
+                                       # /api/entries/{id}/cover instead of
+                                       # pulling MB of base64 in the list.
     featured: bool = False  # legacy: use status='featured' instead
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
@@ -866,7 +871,28 @@ async def list_entries(
         else:
             query["$and"] = extra_and
 
-    items = await db.entries.find(query, {"_id": 0}).to_list(2000)
+    items = await db.entries.aggregate([
+        {"$match": query},
+        # Compute lightweight `has_cover` boolean BEFORE stripping the heavy
+        # base64 field. The list response must never carry the actual photo
+        # bytes — frontend lazy-loads via /api/entries/{id}/cover instead.
+        {"$addFields": {
+            "has_cover": {
+                "$gt": [
+                    {"$strLenCP": {"$ifNull": ["$cover_photo", ""]}},
+                    0,
+                ]
+            }
+        }},
+        # Exclude the multi-MB fields. `description` can also be a few KB on
+        # festival entries — we strip it from lists too (full text is still
+        # available on GET /api/entries/{id}).
+        {"$project": {
+            "_id": 0,
+            "cover_photo": 0,
+            "description": 0,
+        }},
+    ]).to_list(2000)
 
     # Defensive: filter out entries whose date (or end_date) has actually
     # passed, even if they were stored with legacy slash-separated dates
@@ -1153,6 +1179,50 @@ async def get_entry(entry_id: str):
             await attach_likes([cal_ev])
             return Entry(**cal_ev)
     raise HTTPException(status_code=404, detail="Entry not found")
+
+
+@api_router.get("/entries/{entry_id}/cover")
+async def get_entry_cover(entry_id: str):
+    """Serve an entry's cover photo as a real image (not base64 JSON).
+
+    The list endpoint `GET /api/entries` no longer ships the multi-MB
+    `cover_photo` base64 — instead it sets `has_cover: true` and the client
+    lazy-loads each cover via this endpoint.
+
+    Two storage formats are supported:
+    - `data:image/<mime>;base64,...` or bare base64 → decoded and streamed
+      directly with the correct Content-Type.
+    - `https://...` URL (e.g. Unsplash) → 302 redirect so the browser fetches
+      from the CDN directly.
+    """
+    doc = await db.entries.find_one(
+        {"id": entry_id}, {"_id": 0, "cover_photo": 1}
+    )
+    raw = (doc or {}).get("cover_photo") or ""
+    if not raw:
+        raise HTTPException(status_code=404, detail="No cover photo")
+    if raw.startswith(("http://", "https://")):
+        # Remote URL: redirect so the browser can cache via the upstream CDN.
+        return RedirectResponse(url=raw, status_code=302)
+    mime_type = "image/jpeg"
+    b64 = raw
+    if raw.startswith("data:"):
+        head, _, payload = raw.partition(",")
+        try:
+            mime_type = head.split(":", 1)[1].split(";", 1)[0] or "image/jpeg"
+        except Exception:
+            mime_type = "image/jpeg"
+        b64 = payload
+    try:
+        import base64 as _b64
+        binary = _b64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Invalid image data")
+    return Response(
+        content=binary,
+        media_type=mime_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
 
 
 @api_router.post("/entries", response_model=Entry)

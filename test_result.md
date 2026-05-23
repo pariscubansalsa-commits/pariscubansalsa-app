@@ -2146,6 +2146,110 @@ agent_communication:
                  and unliked successfully. ✔ Counter stored in the
                  dedicated `entry_likes` collection (since db.entries
                  doesn't hold this row). ✔
+
+  - task: "PERF — Strip cover_photo & description from list endpoints, stream covers via /entries/{id}/cover"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py, /app/frontend/src/api.ts, /app/frontend/src/EntryCard.tsx, /app/frontend/src/FeaturedCarousel.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            Backend regression for the perf fix executed via
+            /app/backend_test_perf.py against http://localhost:8001/api with
+            admin Bearer test_session_pcs_admin_000.
+            ALL 19 ASSERTIONS PASS (0 failures).
+
+            1) GET /api/entries -> 200, 73 items, payload = 57,892 bytes
+               (< 200KB sanity threshold ✔, multi-MB base64 covers no longer
+               shipped). Every item has has_cover: bool, NO cover_photo
+               leak (null/absent), NO description leak (empty/absent), and
+               all required fields present (id, title, date, end_date, time,
+               venue, address, type, status, dance_style, ticket_link,
+               featured, country, likes, is_mensuelle, level, price,
+               instructor, teacher_id). ✔
+
+            2) GET /api/entries?featured=true -> 200, 5 items, same field
+               sanitisation, and all returned items are featured. ✔
+
+            3) Seeded a workshop with a real `data:image/png;base64,...` cover:
+               - GET /api/entries/{id} returns the FULL cover_photo (data URI
+                 round-trip match) + FULL description (len=111) +
+                 likes:int. ✔
+               - GET /api/entries/{id}/cover -> 200 image/png, body = exact
+                 decoded PNG bytes (70 bytes), header
+                 Cache-Control: public, max-age=86400, immutable. ✔
+               - LIST endpoint shows has_cover=True for the seeded entry
+                 while cover_photo is null and description is empty. ✔
+
+            4) Likes non-regression on the seeded entry:
+               - POST /api/entries/{id}/like -> 200 {likes:1}. ✔
+               - Follow-up GET /api/entries shows likes=1 on the same id. ✔
+
+            5) Seeded a workshop with a remote https://images.unsplash.com/...
+               URL as cover:
+               - GET /api/entries/{id}/cover with follow_redirects=False ->
+                 302, Location header equals the source URL exactly. ✔
+
+            6) Seeded a soirée with no cover_photo:
+               - GET /api/entries/{id}/cover -> 404 {"detail":"No cover photo"}. ✔
+               - GET /api/entries/non_existing_id/cover -> 404. ✔
+
+            7) GET /api/calendar/events -> 200, 21 events; every item has an
+               integer `likes` field (attach_likes still wired on the
+               calendar endpoint). ✔
+
+            Cleanup: the 3 seeded test entries (workshop+png, workshop+remote,
+            soiree+no-cover) all DELETEd successfully (200 ok). Database
+            left clean.
+
+            No blockers. The perf fix is fully working end-to-end on every
+            tested code path (list strip, detail full, cover stream, cover
+            redirect, cover 404, likes regression, calendar likes).
+        - working: true
+          agent: "main"
+          comment: |
+            Critical performance fix. Festivals stored ~1-2MB base64 covers
+            making `/api/entries` payloads multi-MB and load times 2-3 min.
+
+            Backend changes:
+            - `GET /api/entries` now uses an aggregation pipeline that
+              ($addFields) computes `has_cover: bool` and ($project) STRIPS
+              `cover_photo`, `description`, `_id`.
+            - `GET /api/entries/{id}` UNCHANGED — still returns the full
+              entry including cover_photo (single-record cost is OK).
+            - New `GET /api/entries/{id}/cover` endpoint streams the image:
+                * If cover_photo is a `data:image/...;base64,...` URI → decoded
+                  to bytes and served with the proper Content-Type and 24h
+                  immutable cache header.
+                * If cover_photo is an `http(s)://` URL (e.g. Unsplash) →
+                  302 RedirectResponse to that URL.
+                * 404 if no cover_photo set.
+            - `Entry` Pydantic model gained `has_cover: Optional[bool] = None`
+              (only populated on list responses).
+
+            Frontend:
+            - `entryCoverUri()` helper in `api.ts` returns the URI to use:
+              `cover_photo` if present (detail endpoint), else
+              `${API}/entries/${id}/cover` if `has_cover=true`, else null.
+            - `EntryCard` and `FeaturedCarousel` updated to call this helper.
+
+            Verified locally:
+            - GET /api/entries  : 56 KB, 5 ms  (73 entries)
+            - GET /api/entries?featured=true : 4 KB, 3 ms
+            - GET /api/calendar/events : 38 KB, 3 ms
+            - GET /api/highlights : 1 KB, 3 ms
+            - All list items have `has_cover: true|false`, NO cover_photo,
+              NO description in payload.
+            - GET /api/entries/{id} STILL returns description & cover_photo.
+            - GET /api/entries/{id}/cover returns 302 → Unsplash URL for the
+              tested festival, or would stream JPEG bytes for base64 covers.
+            - Home page (Playwright @ 390×844) still shows FeaturedCarousel,
+              HighlightsCarousel, 21 entry cards with 21 LikeButtons.
+
                - Multiple likes from different IPs accumulate. ✔
                - 1 like + 1 unlike from different IPs returns to baseline. ✔
 
