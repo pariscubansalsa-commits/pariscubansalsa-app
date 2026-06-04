@@ -146,6 +146,8 @@ class Entry(BaseModel):
     is_recurrence_master: bool = False
     occurrence_index: Optional[int] = None  # 0, 1, 2… for each child
     cover_photo: Optional[str] = None
+    is_live_music: Optional[bool] = None       # 🎺 badge "Live music"
+    recurrence_label: Optional[str] = None     # e.g. "Chaque jeudi", "Chaque mois"
     featured: bool = False  # legacy: use status='featured' instead
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
@@ -1700,6 +1702,150 @@ def _to_time_str(start, end) -> str:
     return ""
 
 
+# ─────────────── Auto-categorization rules (gcal imports) ───────────────
+# These rules transform raw iCal events into one of the 4 user-facing
+# categories (soiree / mensuelle / workshop / festival). Order matters:
+# festival > workshop > mensuelle > soiree.
+
+_FESTIVAL_KEYWORDS = (
+    "festival", "congress", "congrès", "congres",
+    "marathon", "weekender", "salsa weekend",
+)
+_WORKSHOP_KEYWORDS = (
+    "workshop", "stage ", " stage", "bootcamp", "boot camp",
+    "masterclass", "master class", "atelier",
+    "cours intensif", "intensive",
+)
+# Markers that override workshop detection — if any of these appear in the
+# title, the event is a soirée even if it mentions "cours" or "stage".
+_SOIREE_OVERRIDES = (
+    "soirée", "soiree", "soir ", " soir,", " soir.",
+    "bal ", "party", " club", "rooftop", "concert",
+    "live music", "live tribute", "tribute",
+    "night ", "noche ", "fiesta",
+)
+# Strict "mensuelle" markers — only events that are literally a monthly
+# recurrence. Weekly/Sunday/Thursday recurring soirées stay as `soiree`.
+_MENSUELLE_KEYWORDS = (
+    "mensuelle", "mensuel", "chaque mois", "tous les mois",
+    "1x par mois", "1 fois par mois",
+)
+# Series episode markers in the title — e.g. "#162", "S13E1" — usually
+# denote a long-running monthly residency (see "Baila Al Aire Libre #162").
+_SERIES_RE = re.compile(r"#\d{2,}|s\d+e\d+", re.IGNORECASE)
+
+# Live music badge — purely visual, doesn't change `type`.
+_LIVE_MUSIC_KEYWORDS = (
+    "concert", "live music", "live tribute", "tribute to",
+    "en concert", "live band", "en live",
+)
+
+
+def infer_event_type(
+    title: str,
+    description: str,
+    date_str: Optional[str],
+    end_date_str: Optional[str],
+) -> str:
+    """Heuristically infer the user-facing category from raw iCal text.
+
+    Returns one of: 'festival', 'workshop', 'mensuelle', 'soiree'.
+    Default is 'soiree' (was 'agenda' before this change).
+    """
+    title_l = (title or "").lower()
+    desc_l = (description or "").lower()
+    txt = title_l + " " + desc_l
+
+    # 1) FESTIVAL — explicit keyword always wins.
+    if any(k in txt for k in _FESTIVAL_KEYWORDS):
+        return "festival"
+    # Multi-day rule: only treat as festival if span is ≥3 full days AND the
+    # title doesn't suggest it's a "series of soirées" (Google Cal sometimes
+    # stores a trilogy of nights as one long event).
+    try:
+        if date_str and end_date_str:
+            d1 = date_type.fromisoformat(str(date_str)[:10].replace("/", "-"))
+            d2 = date_type.fromisoformat(str(end_date_str)[:10].replace("/", "-"))
+            span = (d2 - d1).days
+            looks_like_soiree_series = any(
+                k in title_l for k in (
+                    "trilogie", "3 dates", "2 dates", "4 dates",
+                    "3 soirées", "2 soirées",
+                )
+            )
+            if span >= 3 and not looks_like_soiree_series:
+                return "festival"
+    except Exception:
+        pass
+
+    # 2) WORKSHOP — must mention a workshop keyword AND not be a soirée
+    if any(k in txt for k in _WORKSHOP_KEYWORDS) and not any(
+        k in txt for k in _SOIREE_OVERRIDES
+    ):
+        return "workshop"
+    if "cours de danse" in txt and not any(k in txt for k in _SOIREE_OVERRIDES):
+        return "workshop"
+
+    # 3) MENSUELLE — strict monthly only (weekly residencies stay 'soiree')
+    # "mensuelle / mensuel / chaque mois / tous les mois" → can match anywhere
+    # (title or description). Series markers like "#162" or "S13E1" only count
+    # IN THE TITLE — descriptions often contain hashtags or DJ IDs unrelated
+    # to event recurrence.
+    if any(k in txt for k in _MENSUELLE_KEYWORDS):
+        return "mensuelle"
+    if _SERIES_RE.search(title_l):
+        return "mensuelle"
+
+    # 4) Default
+    return "soiree"
+
+
+def detect_live_music(title: str, description: str) -> bool:
+    """Returns True if the event has live music (concert/tribute/etc).
+    Purely visual — adds a badge on the card without changing the type.
+    """
+    txt = ((title or "") + " " + (description or "")).lower()
+    return any(k in txt for k in _LIVE_MUSIC_KEYWORDS)
+
+
+_DAY_FR = {
+    "MO": "lundi", "TU": "mardi", "WE": "mercredi", "TH": "jeudi",
+    "FR": "vendredi", "SA": "samedi", "SU": "dimanche",
+}
+
+
+def detect_recurrence_label(rrule_value: Optional[str]) -> Optional[str]:
+    """Translate an iCal RRULE string into a French human label.
+
+    Examples:
+        RRULE:FREQ=WEEKLY;BYDAY=TH  → "Chaque jeudi"
+        RRULE:FREQ=MONTHLY          → "Chaque mois"
+        RRULE:FREQ=DAILY            → "Chaque jour"
+    Returns None if no RRULE or unrecognised pattern.
+    """
+    if not rrule_value:
+        return None
+    s = str(rrule_value).upper()
+    if "FREQ=WEEKLY" in s:
+        m = re.search(r"BYDAY=([A-Z,]+)", s)
+        if m:
+            days = m.group(1).split(",")
+            labels = [_DAY_FR.get(d.strip()[:2]) for d in days if d.strip()]
+            labels = [d for d in labels if d]
+            if len(labels) == 1:
+                return f"Chaque {labels[0]}"
+            if labels:
+                return "Chaque " + " et ".join(labels)
+        return "Chaque semaine"
+    if "FREQ=MONTHLY" in s:
+        return "Chaque mois"
+    if "FREQ=DAILY" in s:
+        return "Chaque jour"
+    if "FREQ=YEARLY" in s:
+        return "Chaque année"
+    return None
+
+
 def fetch_calendar_entries() -> List[dict]:
     now = datetime.now(timezone.utc)
     if _ical_cache["at"] and now - _ical_cache["at"] < ICAL_CACHE_TTL:
@@ -1745,12 +1891,25 @@ def fetch_calendar_entries() -> List[dict]:
                 parts = [p.strip() for p in location.split(",", 1)]
                 venue, address = parts[0], parts[1]
 
+            # Parse RRULE for "Chaque jeudi / Chaque mois" badge.
+            rrule_prop = component.get("rrule")
+            rrule_str = None
+            if rrule_prop is not None:
+                try:
+                    rrule_str = rrule_prop.to_ical().decode("utf-8")
+                except Exception:
+                    rrule_str = str(rrule_prop)
+            recurrence = detect_recurrence_label(rrule_str)
+
+            date_iso = _to_iso_date(dtstart)
+            end_iso = _to_iso_date(dtend) if dtend and dtend != dtstart else None
+
             items.append({
                 "id": uid,
-                "type": "agenda",
+                "type": infer_event_type(summary, desc_clean, date_iso, end_iso),
                 "title": summary or "Événement",
-                "date": _to_iso_date(dtstart),
-                "end_date": _to_iso_date(dtend) if dtend and dtend != dtstart else None,
+                "date": date_iso,
+                "end_date": end_iso,
                 "time": _to_time_str(dtstart, dtend),
                 "venue": venue,
                 "address": address,
@@ -1759,6 +1918,8 @@ def fetch_calendar_entries() -> List[dict]:
                 "ticket_link": _extract_url(raw_desc),
                 "cover_photo": None,
                 "featured": False,
+                "is_live_music": detect_live_music(summary, desc_clean),
+                "recurrence_label": recurrence,
                 "created_at": now.isoformat(),
             })
         except Exception as e:
@@ -1795,13 +1956,21 @@ GCAL_SYNC_INTERVAL = int(os.environ.get("GCAL_SYNC_INTERVAL_SECONDS", "900"))  #
 
 async def sync_gcal_to_pending() -> dict:
     """Pull events from the Google Calendar iCal feed and upsert them into the
-    Mongo `entries` collection with status=pending so the admin can validate
-    them. Existing entries are matched by (source=gcal, external_id=ical UID).
+    Mongo `entries` collection.
 
-    Returns a stats dict: {created, updated, unchanged}.
+    Behaviour (post-2026-05 audit):
+    - Imported events are auto-categorised via `infer_event_type()` — no more
+      blanket 'agenda' type.
+    - Imported events land with `status="approved"` directly (your Google
+      Calendar is the source of truth, no manual moderation needed).
+    - DEDUP: before creating a new entry, look for a manually-authored entry
+      (source != "gcal") with similar title and same date (±1 day). If found,
+      mark the gcal item as `dedup_conflict` so the admin can merge manually.
+
+    Returns a stats dict: {created, updated, unchanged, skipped, dedup}.
     """
     items = fetch_calendar_entries()
-    stats = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+    stats = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0, "dedup": 0}
     now = datetime.now(timezone.utc)
     today = today_paris_str()
 
@@ -1811,11 +1980,10 @@ async def sync_gcal_to_pending() -> dict:
             stats["skipped"] += 1
             continue
 
-        # Skip past events on ingestion (rule: "ne pas importer les events passés")
+        # Skip past events on ingestion
         d = item.get("date") or ""
         end = item.get("end_date") or ""
         if d < today and (not end or end < today):
-            # Already-imported but now-past entries are kept in DB (for History tab)
             stats["skipped"] += 1
             continue
 
@@ -1823,7 +1991,6 @@ async def sync_gcal_to_pending() -> dict:
             {"source": "gcal", "external_id": ical_uid}, {"_id": 0}
         )
 
-        # Build a comparable signature of the relevant fields
         signature = {
             "title": item.get("title") or "",
             "date": item.get("date") or "",
@@ -1833,56 +2000,110 @@ async def sync_gcal_to_pending() -> dict:
             "address": item.get("address") or "",
             "description": item.get("description") or "",
             "ticket_link": item.get("ticket_link") or "",
+            "type": item.get("type") or "soiree",
+            "is_live_music": bool(item.get("is_live_music")),
+            "recurrence_label": item.get("recurrence_label"),
         }
 
         if existing:
-            # Skip already-rejected (admin chose to archive it)
             if existing.get("status") == "rejected":
                 stats["skipped"] += 1
                 continue
-            existing_sig = {k: existing.get(k) or ("" if k != "end_date" else None) for k in signature}
+            existing_sig = {
+                k: existing.get(k) if k in ("is_live_music",)
+                else (existing.get(k) or ("" if k not in ("end_date", "recurrence_label") else None))
+                for k in signature
+            }
             if existing_sig == signature:
                 stats["unchanged"] += 1
                 continue
-            # Content changed → reset to pending for re-validation
-            update = {**signature, "status": "pending", "last_modified_at": now}
+            # Content changed → update fields, KEEP existing status (admin
+            # may have featured/approved it already).
+            update = {**signature, "last_modified_at": now}
             await db.entries.update_one(
                 {"id": existing["id"]}, {"$set": update}
             )
             stats["updated"] += 1
-        else:
-            new_id = str(uuid.uuid4())
-            doc = {
-                "id": new_id,
-                "type": "agenda",  # generic — admin reassigns during validation
-                "title": signature["title"],
-                "date": signature["date"],
-                "end_date": signature["end_date"],
-                "time": signature["time"],
-                "venue": signature["venue"],
-                "address": signature["address"],
-                "description": signature["description"],
-                "instructor": "",
-                "teacher_id": None,
-                "level": "",
-                "price": "",
-                "category": "",
-                "ticket_link": signature["ticket_link"],
-                "cover_photo": None,
-                "featured": False,
-                "status": "pending",
-                "submitter_name": "Google Calendar",
-                "submitter_email": "",
-                "source": "gcal",
-                "external_id": ical_uid,
-                "last_modified_at": now,
-                "created_at": now,
-            }
-            await db.entries.insert_one(doc)
-            stats["created"] += 1
+            continue
+
+        # DEDUP: check for similar manual entry on the same date (±1 day)
+        title_norm = _normalize_for_dedup(signature["title"])
+        if title_norm:
+            day = signature["date"]
+            try:
+                day_dt = date_type.fromisoformat(str(day)[:10].replace("/", "-"))
+                day_lo = (day_dt - timedelta(days=1)).isoformat()
+                day_hi = (day_dt + timedelta(days=1)).isoformat()
+            except Exception:
+                day_lo = day_hi = day
+            candidates = await db.entries.find(
+                {
+                    "source": {"$ne": "gcal"},
+                    "date": {"$gte": day_lo, "$lte": day_hi},
+                },
+                {"_id": 0, "id": 1, "title": 1},
+            ).to_list(50)
+            dupe = next(
+                (c for c in candidates if _normalize_for_dedup(c.get("title") or "") == title_norm),
+                None,
+            )
+            if dupe:
+                stats["dedup"] += 1
+                logger.info(
+                    "gcal dedup: '%s' on %s matches manual entry %s — NOT importing",
+                    signature["title"], day, dupe.get("id"),
+                )
+                continue
+
+        # No conflict → insert as AUTO-APPROVED
+        new_id = str(uuid.uuid4())
+        doc = {
+            "id": new_id,
+            "type": signature["type"],
+            "title": signature["title"],
+            "date": signature["date"],
+            "end_date": signature["end_date"],
+            "time": signature["time"],
+            "venue": signature["venue"],
+            "address": signature["address"],
+            "description": signature["description"],
+            "instructor": "",
+            "teacher_id": None,
+            "level": "",
+            "price": "",
+            "category": "",
+            "ticket_link": signature["ticket_link"],
+            "cover_photo": None,
+            "featured": False,
+            "is_live_music": signature["is_live_music"],
+            "recurrence_label": signature["recurrence_label"],
+            "status": "approved",          # ← was 'pending', now auto-approved
+            "submitter_name": "Google Calendar",
+            "submitter_email": "",
+            "source": "gcal",
+            "external_id": ical_uid,
+            "last_modified_at": now,
+            "created_at": now,
+        }
+        await db.entries.insert_one(doc)
+        stats["created"] += 1
 
     logger.info("gcal sync done: %s", stats)
     return stats
+
+
+def _normalize_for_dedup(s: str) -> str:
+    """Lowercase, strip punctuation/emoji/extra spaces — used to compare two
+    event titles loosely. e.g. 'Mensuelle Callesol 100% Cubaine!' →
+    'mensuelle callesol 100 cubaine'."""
+    if not s:
+        return ""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    return s
 
 
 @api_router.post("/calendar/sync")
@@ -1892,6 +2113,71 @@ async def trigger_gcal_sync(_user: User = Depends(require_admin)):
     _ical_cache["at"] = None
     stats = await sync_gcal_to_pending()
     return {"ok": True, **stats}
+
+
+@api_router.post("/admin/migrate-gcal-categories")
+async def migrate_gcal_categories(
+    dry_run: bool = False,
+    _user: User = Depends(require_admin),
+):
+    """One-shot migration (Phase 3 — bug #1 + #2 retroactive fix).
+
+    For every entry with `source="gcal"`:
+    - Re-runs `infer_event_type` on title + description and updates `type`
+      if it changed (was almost always 'agenda' before this migration).
+    - Computes `is_live_music` and `recurrence_label` if missing.
+    - Promotes `status="pending"` to `status="approved"` (your gcal is the
+      source of truth — no manual moderation needed).
+    - Does NOT touch entries already `rejected` or `featured`.
+
+    Pass `?dry_run=true` to preview the changes without writing.
+    Returns a detailed log so the admin can audit what changed.
+    """
+    cursor = db.entries.find(
+        {"source": "gcal"},
+        {"_id": 0, "id": 1, "title": 1, "description": 1, "date": 1,
+         "end_date": 1, "type": 1, "status": 1,
+         "is_live_music": 1, "recurrence_label": 1},
+    )
+    changes: List[dict] = []
+    counters = {"scanned": 0, "type_changed": 0, "approved": 0,
+                "unchanged": 0, "skipped_rejected": 0}
+    async for e in cursor:
+        counters["scanned"] += 1
+        if e.get("status") == "rejected":
+            counters["skipped_rejected"] += 1
+            continue
+        new_type = infer_event_type(
+            e.get("title") or "",
+            e.get("description") or "",
+            e.get("date"),
+            e.get("end_date"),
+        )
+        new_lm = detect_live_music(e.get("title") or "", e.get("description") or "")
+        set_fields: dict = {}
+        delta: dict = {"id": e.get("id"), "title": (e.get("title") or "")[:70]}
+        if new_type != e.get("type"):
+            set_fields["type"] = new_type
+            delta["type"] = f"{e.get('type')!r} → {new_type!r}"
+        if e.get("is_live_music") is None or bool(e.get("is_live_music")) != new_lm:
+            set_fields["is_live_music"] = new_lm
+            delta["is_live_music"] = new_lm
+        if e.get("status") == "pending":
+            set_fields["status"] = "approved"
+            delta["status"] = "pending → approved"
+            counters["approved"] += 1
+        if set_fields:
+            if "type" in set_fields:
+                counters["type_changed"] += 1
+            if not dry_run:
+                await db.entries.update_one({"id": e["id"]}, {"$set": set_fields})
+            changes.append(delta)
+        else:
+            counters["unchanged"] += 1
+    logger.info(
+        "migrate-gcal-categories: dry_run=%s, counters=%s", dry_run, counters
+    )
+    return {"ok": True, "dry_run": dry_run, "counters": counters, "changes": changes}
 
 
 import asyncio  # noqa: E402

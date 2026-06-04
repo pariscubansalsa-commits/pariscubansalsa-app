@@ -151,6 +151,30 @@ export default function EntryCard({
             </View>
           )}
 
+          {/* Live music + récurrence badges — visuels uniquement, n'affectent
+              pas la catégorie de la card (la card peut toujours être une
+              soirée même avec live music ou récurrence hebdomadaire). */}
+          {(entry.is_live_music || entry.recurrence_label) && (
+            <View style={styles.badgeRow}>
+              {!!entry.is_live_music && (
+                <View style={[styles.miniBadge, styles.liveBadge]}>
+                  <Text style={styles.liveBadgeIcon}>🎺</Text>
+                  <Text style={styles.liveBadgeText}>Live music</Text>
+                </View>
+              )}
+              {!!entry.recurrence_label && (
+                <View style={[styles.miniBadge, styles.recBadge]}>
+                  <Ionicons
+                    name="repeat-outline"
+                    size={11}
+                    color={COLORS.primaryText}
+                  />
+                  <Text style={styles.recBadgeText}>{entry.recurrence_label}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
           {!!entry.venue && (
             <View style={styles.metaRow}>
               <Ionicons name="location-outline" size={13} color={COLORS.secondaryText} />
@@ -293,6 +317,48 @@ const styles = StyleSheet.create({
     color: COLORS.accentYellow,
     textDecorationLine: "underline",
     marginBottom: 0,
+  },
+  // Mini-badges (live music, recurrence) — visual hints on the card
+  badgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  miniBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 40,
+    borderWidth: 1,
+  },
+  liveBadge: {
+    backgroundColor: "rgba(245,197,24,0.10)",
+    borderColor: COLORS.accentYellow,
+  },
+  liveBadgeIcon: {
+    fontSize: 11,
+    lineHeight: 13,
+  },
+  liveBadgeText: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 0.6,
+    color: COLORS.accentYellow,
+    textTransform: "uppercase",
+  },
+  recBadge: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: COLORS.border,
+  },
+  recBadgeText: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 0.4,
+    color: COLORS.primaryText,
+    textTransform: "uppercase",
   },
   teacherLinkWrap: {
     flexDirection: "row",

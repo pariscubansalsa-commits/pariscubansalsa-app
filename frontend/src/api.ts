@@ -63,6 +63,8 @@ export type EntryItem = {
   instagram_post?: string;
   is_mensuelle?: boolean;
   cover_photo?: string | null;
+  is_live_music?: boolean | null;
+  recurrence_label?: string | null;
   featured?: boolean;
   status?: "pending" | "approved" | "featured" | "rejected";
   submitter_name?: string;
