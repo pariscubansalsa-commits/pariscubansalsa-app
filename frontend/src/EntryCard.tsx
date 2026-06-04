@@ -154,8 +154,16 @@ export default function EntryCard({
           {/* Live music + récurrence badges — visuels uniquement, n'affectent
               pas la catégorie de la card (la card peut toujours être une
               soirée même avec live music ou récurrence hebdomadaire). */}
-          {(entry.is_live_music || entry.recurrence_label) && (
+          {(entry.is_live_music || entry.recurrence_label || (entry.partner_status && entry.partner_status !== "none")) && (
             <View style={styles.badgeRow}>
+              {entry.partner_status && entry.partner_status !== "none" && (
+                <View style={[styles.miniBadge, styles.partnerBadge]}>
+                  <Text style={styles.partnerBadgeIcon}>✨</Text>
+                  <Text style={styles.partnerBadgeText}>
+                    {entry.partner_status === "premium_partner" ? "Premium PCS" : "Partenaire PCS"}
+                  </Text>
+                </View>
+              )}
               {!!entry.is_live_music && (
                 <View style={[styles.miniBadge, styles.liveBadge]}>
                   <Text style={styles.liveBadgeIcon}>🎺</Text>
@@ -337,6 +345,21 @@ const styles = StyleSheet.create({
   liveBadge: {
     backgroundColor: "rgba(245,197,24,0.10)",
     borderColor: COLORS.accentYellow,
+  },
+  partnerBadge: {
+    backgroundColor: "rgba(245,197,24,0.18)",
+    borderColor: COLORS.accentYellow,
+  },
+  partnerBadgeIcon: {
+    fontSize: 11,
+    lineHeight: 13,
+  },
+  partnerBadgeText: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 10,
+    letterSpacing: 0.6,
+    color: COLORS.accentYellow,
+    textTransform: "uppercase",
   },
   liveBadgeIcon: {
     fontSize: 11,

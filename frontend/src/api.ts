@@ -65,6 +65,9 @@ export type EntryItem = {
   cover_photo?: string | null;
   is_live_music?: boolean | null;
   recurrence_label?: string | null;
+  is_featured?: boolean | null;
+  partner_status?: "none" | "partner" | "premium_partner" | null;
+  admin_locked?: boolean | null;
   featured?: boolean;
   status?: "pending" | "approved" | "featured" | "rejected";
   submitter_name?: string;
@@ -267,6 +270,11 @@ export const api = {
         skipped: number;
       }>(r)
     ),
+  resetGcalOverride: (token: string, id: string) =>
+    fetch(`${API}/admin/entries/${id}/reset-gcal`, {
+      method: "POST",
+      headers: authHeaders(token),
+    }).then((r) => handle<{ ok: boolean }>(r)),
   getEntry: (id: string) =>
     fetch(`${API}/entries/${id}`).then((r) => handle<EntryItem>(r)),
   createEntry: (token: string, body: Partial<EntryItem>) =>

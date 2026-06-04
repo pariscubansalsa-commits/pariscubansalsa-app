@@ -70,11 +70,16 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Hidden routes — kept for direct navigation only */}
       <Tabs.Screen
         name="profs"
-        options={{ href: null, title: "Artistes" }}
+        options={{
+          title: "Artistes",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="mic-outline" color={color} focused={focused} />
+          ),
+        }}
       />
+      {/* Hidden routes — kept for direct navigation only */}
       <Tabs.Screen
         name="galerie"
         options={{ href: null, title: "Galerie" }}

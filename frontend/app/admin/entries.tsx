@@ -48,6 +48,7 @@ const EMPTY = {
   ticket_link: "",
   cover_photo: null as string | null,
   featured: false,
+  partner_status: "none" as "none" | "partner" | "premium_partner",
   dance_style: "multi_styles" as DanceStyle,
   recurrence: { freq: "none" } as Recurrence,
 };
@@ -121,7 +122,8 @@ export default function AdminEntries() {
       instructor: e.instructor || "",
       ticket_link: e.ticket_link || "",
       cover_photo: e.cover_photo || null,
-      featured: !!e.featured,
+      featured: !!e.featured || !!e.is_featured,
+      partner_status: (e.partner_status as any) || "none",
       dance_style: (e.dance_style as DanceStyle) || "multi_styles",
       recurrence: (e.recurrence as Recurrence) || { freq: "none" },
     });
@@ -152,7 +154,14 @@ export default function AdminEntries() {
     }
     setSubmitting(true);
     try {
-      const body = { type: filter === "pending" ? "soiree" : filter, ...form };
+      const body: any = {
+        type: filter === "pending" ? "soiree" : filter,
+        ...form,
+        // Sprint refactor: send is_featured (orthogonal dim) so back-end
+        // can distinguish editorial pick from moderation state.
+        is_featured: !!form.featured,
+        partner_status: form.partner_status || "none",
+      };
       if (editing) {
         await api.updateEntry(token, editing.id, body);
         // Fix 2 (Phase 3): if we were editing a pending submission AND the
@@ -614,7 +623,7 @@ export default function AdminEntries() {
                   <View>
                     <Text style={styles.featureTitle}>Coup de cœur</Text>
                     <Text style={styles.featureSub}>
-                      Mise en avant dans le carrousel d&apos;accueil (partenaires payants)
+                      Mise en avant dans le carrousel d&apos;accueil (curation éditoriale)
                     </Text>
                   </View>
                 </View>
@@ -622,6 +631,65 @@ export default function AdminEntries() {
                   <View style={[styles.switchDot, form.featured && styles.switchDotOn]} />
                 </View>
               </TouchableOpacity>
+
+              {/* Sprint refactor: Statut partenaire — orthogonal au coup
+                  de cœur. Drive l'apparition dans la tab Mensuelles +
+                  badge ✨ public. */}
+              <View style={styles.partnerBox}>
+                <Text style={styles.partnerLabel}>STATUT PARTENAIRE</Text>
+                <Text style={styles.partnerHelp}>
+                  Partenaire = visible dans la tab Mensuelles +
+                  badge ✨ sur la card. Premium = réservé évolutions futures.
+                </Text>
+                <View style={styles.partnerChips}>
+                  {(["none", "partner", "premium_partner"] as const).map((v) => {
+                    const active = (form.partner_status || "none") === v;
+                    return (
+                      <TouchableOpacity
+                        key={v}
+                        testID={`partner-${v}`}
+                        onPress={() => setForm({ ...form, partner_status: v })}
+                        style={[styles.partnerChip, active && styles.partnerChipOn]}
+                      >
+                        <Text style={[styles.partnerChipTxt, active && styles.partnerChipTxtOn]}>
+                          {v === "none" ? "Aucun" : v === "partner" ? "Partenaire" : "Premium"}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Commit D: badge + bouton reset uniquement si l'entry vient
+                  du sync iCal ET a été modifiée manuellement. */}
+              {editing?.source === "gcal" && editing?.admin_locked && (
+                <View style={styles.lockedBox}>
+                  <View style={styles.lockedRow}>
+                    <Ionicons name="create-outline" size={16} color={COLORS.accentYellow} />
+                    <Text style={styles.lockedText}>
+                      ✏️ Modifié manuellement — la sync iCal ne touchera plus
+                      cet event.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    testID="reset-gcal"
+                    style={styles.lockedBtn}
+                    onPress={async () => {
+                      if (!editing) return;
+                      try {
+                        await api.resetGcalOverride(token, editing.id);
+                        setModalOpen(false);
+                        await load();
+                      } catch (e: any) {
+                        notify("Erreur", e.message);
+                      }
+                    }}
+                  >
+                    <Ionicons name="arrow-undo-outline" size={14} color={COLORS.primaryText} />
+                    <Text style={styles.lockedBtnTxt}>↩️ RÉINITIALISER DEPUIS GOOGLE CAL</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {editingPending && (
                 <TouchableOpacity
@@ -944,6 +1012,91 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
     letterSpacing: 1.2,
+    color: COLORS.primaryText,
+  },
+  partnerBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "rgba(255,255,255,0.02)",
+  },
+  partnerLabel: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.4,
+    color: COLORS.primaryText,
+  },
+  partnerHelp: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.secondaryText,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  partnerChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  partnerChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  partnerChipOn: {
+    backgroundColor: COLORS.accentYellow,
+    borderColor: COLORS.accentYellow,
+  },
+  partnerChipTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    color: COLORS.primaryText,
+  },
+  partnerChipTxtOn: {
+    color: "#0B0B0B",
+  },
+  lockedBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.accentYellow,
+    backgroundColor: "rgba(245,197,24,0.06)",
+  },
+  lockedRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  lockedText: {
+    flex: 1,
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: COLORS.primaryText,
+    lineHeight: 18,
+  },
+  lockedBtn: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  lockedBtnTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.0,
     color: COLORS.primaryText,
   },
   modActions: {
