@@ -63,6 +63,11 @@ export default function AdminEntries() {
   const [submitting, setSubmitting] = useState(false);
   const [pendingTypeMap, setPendingTypeMap] = useState<Record<string, EntryType>>({});
   const [syncing, setSyncing] = useState(false);
+  // Fix 2 (Phase 3): when admin clicks "Éditer" on a pending entry, the
+  // edit modal opens with a checkbox "Valider directement après édition?".
+  // Checked by default — 99% of edits are "fix the typo + approve".
+  const [editApproveAfter, setEditApproveAfter] = useState<boolean>(true);
+  const [editingPending, setEditingPending] = useState<boolean>(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,6 +107,8 @@ export default function AdminEntries() {
 
   const openEdit = (e: EntryItem) => {
     setEditing(e);
+    setEditingPending(e.status === "pending");
+    setEditApproveAfter(e.status === "pending");
     setForm({
       title: e.title || "",
       date: e.date || "",
@@ -145,9 +152,21 @@ export default function AdminEntries() {
     setSubmitting(true);
     try {
       const body = { type: filter === "pending" ? "soiree" : filter, ...form };
-      if (editing) await api.updateEntry(token, editing.id, body);
-      else await api.createEntry(token, body);
+      if (editing) {
+        await api.updateEntry(token, editing.id, body);
+        // Fix 2 (Phase 3): if we were editing a pending submission AND the
+        // admin kept the "Valider directement après édition" checkbox ticked
+        // (default), we approve it right after the update so the admin
+        // doesn't have to do a second click. status='pending' is preserved
+        // otherwise — same logic as before for non-pending edits.
+        if (editingPending && editApproveAfter) {
+          await api.approveEntry(token, editing.id, body.type as EntryType);
+        }
+      } else {
+        await api.createEntry(token, body);
+      }
       setModalOpen(false);
+      setEditingPending(false);
       await load();
     } catch (e: any) {
       notify("Erreur", e.message);
@@ -425,6 +444,18 @@ export default function AdminEntries() {
                         <Text style={styles.approveTxt}>VALIDER</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
+                        testID={`edit-pending-${e.id}`}
+                        style={[styles.modBtn, styles.editBtn]}
+                        onPress={() => openEdit(e)}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={16}
+                          color={COLORS.primaryText}
+                        />
+                        <Text style={styles.editTxt}>ÉDITER</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
                         testID={`feature-pending-${e.id}`}
                         style={[styles.modBtn, styles.featureBtn]}
                         onPress={() => handleApproveFeature(e.id)}
@@ -591,6 +622,28 @@ export default function AdminEntries() {
                 </View>
               </TouchableOpacity>
 
+              {editingPending && (
+                <TouchableOpacity
+                  testID="edit-approve-after"
+                  onPress={() => setEditApproveAfter(!editApproveAfter)}
+                  style={styles.switchRow}
+                >
+                  <Text style={styles.switchLabel}>
+                    Valider directement après édition
+                  </Text>
+                  <View
+                    style={[styles.switch, editApproveAfter && styles.switchOn]}
+                  >
+                    <View
+                      style={[
+                        styles.switchDot,
+                        editApproveAfter && styles.switchDotOn,
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 testID="submit-entry"
                 style={[styles.primaryBtn, submitting && { opacity: 0.6 }]}
@@ -598,7 +651,13 @@ export default function AdminEntries() {
                 disabled={submitting}
               >
                 <Text style={styles.primaryBtnTxt}>
-                  {submitting ? "ENREGISTREMENT..." : editing ? "METTRE À JOUR" : "CRÉER"}
+                  {submitting
+                    ? "ENREGISTREMENT..."
+                    : editing
+                    ? editingPending && editApproveAfter
+                      ? "ENREGISTRER & VALIDER"
+                      : "METTRE À JOUR"
+                    : "CRÉER"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -847,6 +906,17 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accentYellow,
   },
   approveTxt: {
+    fontFamily: FONTS.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: COLORS.primaryText,
+  },
+  editBtn: {
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  editTxt: {
     fontFamily: FONTS.bodyBold,
     fontSize: 11,
     letterSpacing: 1.2,
