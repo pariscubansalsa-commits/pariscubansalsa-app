@@ -44,11 +44,10 @@ const EMPTY = {
 };
 
 const TYPE_OPTIONS: { v: EntryTypeSubmit; l: string }[] = [
-  { v: "soiree", l: "Soirée / concert" },
+  { v: "soiree", l: "Soirée" },
   { v: "mensuelle", l: "Mensuelle" },
   { v: "workshop", l: "Workshop" },
   { v: "festival", l: "Festival" },
-  { v: "agenda", l: "Sortie / autre" },
 ];
 
 const LEVELS = [

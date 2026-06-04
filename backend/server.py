@@ -928,6 +928,23 @@ async def submit_entry(payload: EntrySubmit, background_tasks: BackgroundTasks):
     data = payload.dict()
     data["dance_style"] = normalize_dance_style(data.get("dance_style"))
 
+    # Fallback inference (Phase 3 audit, option B): if the submitter picked
+    # "agenda" (legacy) or somehow ended up with an empty type, run the same
+    # auto-categorizer used for gcal imports so the event lands in a real,
+    # user-facing tab (soiree by default).
+    if data.get("type") in (None, "", "agenda"):
+        data["type"] = infer_event_type(
+            data.get("title") or "",
+            data.get("description") or "",
+            data.get("date"),
+            data.get("end_date"),
+        )
+
+    # Same auto-flagging as gcal for visual badges.
+    data["is_live_music"] = detect_live_music(
+        data.get("title") or "", data.get("description") or ""
+    )
+
     # Trusted teacher → auto-approve workshops
     auto_approved = False
     if data.get("teacher_id") and payload.type == "workshop":

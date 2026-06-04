@@ -57,8 +57,13 @@ export default function EntriesScreen({
 
   const load = useCallback(async () => {
     try {
+      // Use the DB-backed `/api/entries` endpoint so manually-approved events
+      // (submitted via "Proposer un event" / scraped festivals / etc.) are
+      // visible alongside the auto-synced Google Calendar events. The gcal
+      // sync mirrors every iCal event into db.entries with status=approved
+      // (since Phase 3 audit fix), so a single source of truth is enough.
       const data = useCalendar
-        ? await api.listCalendar()
+        ? await api.listEntries(undefined, danceStyle)
         : await api.listEntries(type, danceStyle);
       // Calendar endpoint doesn't filter by dance_style server-side; do it client-side
       const filtered =
