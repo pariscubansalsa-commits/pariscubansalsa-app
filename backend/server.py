@@ -918,7 +918,9 @@ async def submit_entry(payload: EntrySubmit, background_tasks: BackgroundTasks):
     (name, email, optional link). The admin inbox is notified by email
     asynchronously (background task) so the user response is not delayed.
     """
-    if payload.type not in VALID_TYPES:
+    # Allow empty type — fallback inference (a few lines below) will fill it
+    # from title/description. Reject only an explicitly *wrong* non-empty value.
+    if payload.type and payload.type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Type d'event invalide")
     if not payload.submitter_name.strip() or not payload.submitter_email.strip():
         raise HTTPException(status_code=400, detail="Nom et email requis")
