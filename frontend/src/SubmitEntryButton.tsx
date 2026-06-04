@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, TeacherItem } from "./api";
 import { COLORS, FONTS, SPACING } from "./theme";
 import { DanceStyleChips, DanceStyle } from "./DanceStyle";
+import DateInput from "./DateInput";
 
 export type EntryTypeSubmit = "soiree" | "workshop" | "festival" | "agenda" | "mensuelle";
 
@@ -242,42 +243,44 @@ export default function SubmitEntryButton({
                     value={form.title}
                     onChange={(v) => setForm({ ...form, title: v })}
                   />
-                  <Field
-                    label="DATE * (AAAA-MM-JJ)"
-                    testID="sub-date"
-                    value={form.date}
-                    onChange={(v) => setForm({ ...form, date: v })}
-                    autoCapitalize="none"
-                    placeholder="2027-05-22"
-                  />
-                  {currentType === "festival" && (
-                    <Field
-                      label="DATE DE FIN (AAAA-MM-JJ)"
-                      testID="sub-end-date"
-                      value={form.end_date}
-                      onChange={(v) => setForm({ ...form, end_date: v })}
-                      autoCapitalize="none"
-                      placeholder="2027-05-25"
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={styles.label}>DATE * (JJ/MM/AAAA)</Text>
+                    <DateInput
+                      testID="sub-date"
+                      value={form.date}
+                      onChange={(v) => setForm({ ...form, date: v })}
+                      mode="date"
                     />
+                  </View>
+                  {currentType === "festival" && (
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={styles.label}>DATE DE FIN (JJ/MM/AAAA)</Text>
+                      <DateInput
+                        testID="sub-end-date"
+                        value={form.end_date}
+                        onChange={(v) => setForm({ ...form, end_date: v })}
+                        mode="date"
+                      />
+                    </View>
                   )}
 
                   <View style={styles.timeRow}>
                     <View style={{ flex: 1 }}>
-                      <Field
-                        label="HEURE DÉBUT"
+                      <Text style={styles.label}>HEURE DÉBUT</Text>
+                      <DateInput
                         testID="sub-time"
                         value={form.time}
                         onChange={(v) => setForm({ ...form, time: v })}
-                        placeholder="20:30"
+                        mode="time"
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Field
-                        label="HEURE FIN"
+                      <Text style={styles.label}>HEURE FIN</Text>
+                      <DateInput
                         testID="sub-end-time"
                         value={form.end_time}
                         onChange={(v) => setForm({ ...form, end_time: v })}
-                        placeholder="03:00"
+                        mode="time"
                       />
                     </View>
                   </View>

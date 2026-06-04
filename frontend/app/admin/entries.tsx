@@ -24,6 +24,7 @@ import { confirmAction, notify } from "../../src/dialog";
 import { useAuth } from "../../src/auth";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { Image } from "react-native";
+import DateInput from "../../src/DateInput";
 
 const TYPES: { key: EntryType | "pending" | "rejected" | "history"; label: string }[] = [
   { key: "pending", label: "À valider" },
@@ -559,11 +560,11 @@ export default function AdminEntries() {
               </View>
 
               <Field label="TITRE" testID="entry-title" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
-              <Field label="DATE (AAAA-MM-JJ)" testID="entry-date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} autoCapitalize="none" />
+              <DateField label="DATE (JJ/MM/AAAA)" testID="entry-date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
               {isFestival && (
-                <Field label="DATE DE FIN (AAAA-MM-JJ)" testID="entry-end-date" value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} autoCapitalize="none" />
+                <DateField label="DATE DE FIN (JJ/MM/AAAA)" testID="entry-end-date" value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} />
               )}
-              <Field label="HORAIRE" testID="entry-time" value={form.time} onChange={(v) => setForm({ ...form, time: v })} placeholder="20:30" />
+              <TimeField label="HORAIRE" testID="entry-time" value={form.time} onChange={(v) => setForm({ ...form, time: v })} />
               <Field label="LIEU" testID="entry-venue" value={form.venue} onChange={(v) => setForm({ ...form, venue: v })} placeholder="Le Cabaret Sauvage" />
               <Field label="ADRESSE" testID="entry-address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} placeholder="Parc de la Villette, Paris" />
               {isWorkshop && (
@@ -701,6 +702,29 @@ function Field({
     </View>
   );
 }
+
+function DateField({
+  label, value, onChange, testID,
+}: { label: string; value: string; onChange: (v: string) => void; testID?: string }) {
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={styles.label}>{label}</Text>
+      <DateInput value={value} onChange={onChange} mode="date" testID={testID} />
+    </View>
+  );
+}
+
+function TimeField({
+  label, value, onChange, testID,
+}: { label: string; value: string; onChange: (v: string) => void; testID?: string }) {
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={styles.label}>{label}</Text>
+      <DateInput value={value} onChange={onChange} mode="time" testID={testID} />
+    </View>
+  );
+}
+
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },

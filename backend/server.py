@@ -927,6 +927,17 @@ async def submit_entry(payload: EntrySubmit, background_tasks: BackgroundTasks):
 
     data = payload.dict()
     data["dance_style"] = normalize_dance_style(data.get("dance_style"))
+    # Fix 3 (Phase 3): accept dates in either ISO (2026-07-04) or French
+    # (04/07/2026) — normalise to ISO before storage.
+    if data.get("date"):
+        norm = normalize_date_to_iso(data.get("date"))
+        if not norm:
+            raise HTTPException(status_code=400, detail="Date invalide (format attendu : JJ/MM/AAAA)")
+        data["date"] = norm
+    if data.get("end_date"):
+        norm_end = normalize_date_to_iso(data.get("end_date"))
+        if norm_end:
+            data["end_date"] = norm_end
 
     # Fallback inference (Phase 3 audit, option B): if the submitter picked
     # "agenda" (legacy) or somehow ended up with an empty type, run the same
@@ -1191,6 +1202,16 @@ async def create_entry(payload: EntryCreate, _user: User = Depends(require_admin
         raise HTTPException(status_code=400, detail="Invalid type")
     data = payload.dict()
     data["dance_style"] = normalize_dance_style(data.get("dance_style"))
+    # Fix 3 (Phase 3): tolerant date parser — admin can paste FR or ISO.
+    if data.get("date"):
+        norm = normalize_date_to_iso(data.get("date"))
+        if not norm:
+            raise HTTPException(status_code=400, detail="Date invalide (format attendu : JJ/MM/AAAA)")
+        data["date"] = norm
+    if data.get("end_date"):
+        norm_end = normalize_date_to_iso(data.get("end_date"))
+        if norm_end:
+            data["end_date"] = norm_end
     if not data.get("status"):
         data["status"] = "featured" if data.get("featured") else "approved"
     # Detect recurrence intent
@@ -1543,6 +1564,16 @@ async def update_entry(
         update.pop("recurrence", None)
     if "dance_style" in update:
         update["dance_style"] = normalize_dance_style(update["dance_style"])
+    # Fix 3 (Phase 3): tolerant date parser on admin edits
+    if update.get("date"):
+        norm = normalize_date_to_iso(update.get("date"))
+        if not norm:
+            raise HTTPException(status_code=400, detail="Date invalide (format attendu : JJ/MM/AAAA)")
+        update["date"] = norm
+    if update.get("end_date"):
+        norm_end = normalize_date_to_iso(update.get("end_date"))
+        if norm_end:
+            update["end_date"] = norm_end
     if "featured" in update:
         if update["featured"]:
             update["status"] = "featured"
@@ -1703,6 +1734,48 @@ def _to_iso_date(value) -> str:
     if isinstance(value, date_type):
         return value.isoformat()
     return str(value)
+
+
+# ───────────────────────── Date parsing (tolerant) ─────────────────────────
+# Accepts: ISO (2026-07-04 or 2026/07/04), French (04/07/2026 or 04-07-2026),
+# and ISO datetime (2026-07-04T19:00:00). Stores everything as ISO date
+# strings (YYYY-MM-DD) so Mongo sorting and comparisons stay consistent.
+
+_DATE_PATTERNS = (
+    # ISO: 2026-07-04 / 2026/07/04
+    re.compile(r"^(?P<y>\d{4})[-/](?P<m>\d{1,2})[-/](?P<d>\d{1,2})$"),
+    # French: 04/07/2026 / 04-07-2026
+    re.compile(r"^(?P<d>\d{1,2})[-/](?P<m>\d{1,2})[-/](?P<y>\d{4})$"),
+)
+
+
+def normalize_date_to_iso(raw) -> Optional[str]:
+    """Best-effort normalisation of any date-shape into 'YYYY-MM-DD'.
+
+    Returns None on empty / invalid input. Safe to call on already-ISO
+    strings (returns them as-is after validation).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.date().isoformat()
+    if isinstance(raw, date_type):
+        return raw.isoformat()
+    s = str(raw).strip()
+    if not s:
+        return None
+    # Strip trailing time part (ISO datetime like '2026-07-04T19:00')
+    s_no_time = s.split("T")[0].split(" ")[0]
+    for pat in _DATE_PATTERNS:
+        m = pat.match(s_no_time)
+        if not m:
+            continue
+        try:
+            y, mo, d = int(m.group("y")), int(m.group("m")), int(m.group("d"))
+            return date_type(y, mo, d).isoformat()
+        except (ValueError, KeyError):
+            continue
+    return None
 
 
 def _to_time_str(start, end) -> str:
