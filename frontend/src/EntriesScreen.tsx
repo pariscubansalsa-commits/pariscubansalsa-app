@@ -57,20 +57,21 @@ export default function EntriesScreen({
 
   const load = useCallback(async () => {
     try {
-      // Use the DB-backed `/api/entries` endpoint so manually-approved events
-      // (submitted via "Proposer un event" / scraped festivals / etc.) are
-      // visible alongside the auto-synced Google Calendar events. The gcal
-      // sync mirrors every iCal event into db.entries with status=approved
-      // (since Phase 3 audit fix), so a single source of truth is enough.
-      const data = useCalendar
-        ? await api.listEntries(undefined, danceStyle)
-        : await api.listEntries(type, danceStyle);
-      // Calendar endpoint doesn't filter by dance_style server-side; do it client-side
-      const filtered =
-        useCalendar && danceStyle !== "all"
-          ? data.filter((d) => d.dance_style === danceStyle)
-          : data;
-      setItems(filtered);
+      // Sprint refactor (post-audit): the home (`useCalendar=true`) is the
+      // "Soirées" tab → it MUST filter type='soiree'. The backend's
+      // list_entries() already merges soiree + mensuelle into a single
+      // chronological ASC stream when type='soiree' is asked for (see
+      // server.py Sprint A commit). Passing `undefined` here would leak
+      // workshops/festivals into the home, which is exactly the regression
+      // reported on 2026-06-04 ("GALA CUBANÍA seen in Soirées").
+      const effectiveType: EntryType | undefined = useCalendar
+        ? "soiree"
+        : type;
+      const data = await api.listEntries(effectiveType, danceStyle);
+      // Server returns dance_style-filtered + type-filtered + ASC-sorted
+      // results already (see server.py items.sort(key=sort_key) for the
+      // unified ordering). No extra client-side filtering needed.
+      setItems(data);
     } catch (e) {
       console.log("entries err", e);
     } finally {

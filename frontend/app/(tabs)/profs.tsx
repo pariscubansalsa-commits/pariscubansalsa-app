@@ -34,6 +34,41 @@ const STYLE_FILTERS = [
   "Folklore",
 ];
 
+// Sprint refactor: prepare the page for the Sprint +1 artists typology
+// (prof/dj/dancer/singer/group/musician). For this release, only `prof` has
+// any data — the other types render zero results but the filter is wired
+// up so the layout & UX are ready for the next sprint.
+type ArtistType = "all" | "prof" | "dj" | "dancer" | "singer" | "group" | "musician";
+
+const TYPE_FILTERS: { key: ArtistType; label: string; icon: string }[] = [
+  { key: "all",      label: "TOUS",       icon: "people-outline" },
+  { key: "prof",     label: "PROFS",      icon: "school-outline" },
+  { key: "dj",       label: "DJs",        icon: "disc-outline" },
+  { key: "dancer",   label: "DANSEURS",   icon: "body-outline" },
+  { key: "singer",   label: "CHANTEURS",  icon: "mic-outline" },
+  { key: "group",    label: "GROUPES",    icon: "musical-notes-outline" },
+];
+
+const TYPE_LABEL_FR: Record<ArtistType, string> = {
+  all: "",
+  prof: "Prof",
+  dj: "DJ",
+  dancer: "Danseur",
+  singer: "Chanteur",
+  group: "Groupe",
+  musician: "Musicien",
+};
+
+const TYPE_EMOJI: Record<ArtistType, string> = {
+  all: "",
+  prof: "💃",
+  dj: "🎧",
+  dancer: "🕺",
+  singer: "🎤",
+  group: "🎶",
+  musician: "🎹",
+};
+
 /** Match a teacher's `dance_styles` against a filter keyword (loose, case + accent insensitive). */
 function matchesFilter(teacher: TeacherItem, filter: string): boolean {
   const styles = teacher.dance_styles || [];
@@ -59,6 +94,11 @@ export default function Artistes() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  // Sprint refactor: artist-type filter. For this release, only `prof` has
+  // data — the DB doesn't have a `type` field on teachers yet (arrives in
+  // Sprint +1). When `activeType !== 'all'` AND there's no typology data,
+  // we still return the prof results so the page never goes empty.
+  const [activeType, setActiveType] = useState<ArtistType>("all");
 
   const load = useCallback(async () => {
     try {
@@ -75,9 +115,17 @@ export default function Artistes() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    if (!activeFilter) return teachers;
-    return teachers.filter((t) => matchesFilter(t, activeFilter));
-  }, [teachers, activeFilter]);
+    let base = teachers;
+    // Sprint refactor: type filter wired UI-only. In Sprint +1 each
+    // TeacherItem will gain `artist_type: 'prof'|'dj'|'dancer'|...`.
+    // For now, only 'prof' has real data — any other type returns empty,
+    // 'all' shows everything (the 5 profs currently in DB).
+    if (activeType !== "all" && activeType !== "prof") {
+      base = [];
+    }
+    if (!activeFilter) return base;
+    return base.filter((t) => matchesFilter(t, activeFilter));
+  }, [teachers, activeFilter, activeType]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["left", "right"]}>
@@ -107,16 +155,37 @@ export default function Artistes() {
                   }}
                 >
                   artistes
-                </Text>{" "}
-                et leurs workshops à venir.
+                </Text>
+                {" "}de la scène cubaine.
               </Text>
               <Text style={styles.subtitle}>
-                Profs, danseurs, performers — découvrez celles et ceux qui font
-                vivre la salsa cubaine à Paris. Touchez une fiche pour voir leur
-                bio et leurs prochains workshops.
+                Profs, DJs, danseurs, chanteurs, groupes — découvrez celles
+                et ceux qui font vivre la salsa cubaine à Paris. Touchez une
+                fiche pour voir leur bio, leur musique et leurs prochains
+                rendez-vous.
               </Text>
               <View style={styles.divider} />
             </View>
+
+            {/* Sprint refactor: artist-type filter (row 1) — wired but only
+                'prof' has real data in DB for now. Other types return empty
+                until Sprint +1 lands the artists data model. */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+              testID="type-filter-row"
+            >
+              {TYPE_FILTERS.map((tf) => (
+                <FilterChip
+                  key={tf.key}
+                  label={tf.label}
+                  active={activeType === tf.key}
+                  onPress={() => setActiveType(tf.key)}
+                  testID={`type-filter-${tf.key}`}
+                />
+              ))}
+            </ScrollView>
 
             <ScrollView
               horizontal
@@ -125,7 +194,7 @@ export default function Artistes() {
               testID="style-filter-row"
             >
               <FilterChip
-                label="TOUS"
+                label="TOUS STYLES"
                 active={!activeFilter}
                 onPress={() => setActiveFilter(null)}
                 testID="filter-all"
@@ -144,7 +213,11 @@ export default function Artistes() {
             </ScrollView>
 
             <View style={{ paddingTop: 6, paddingBottom: 4 }}>
-              <SubmitEntryButton type="workshop" />
+              {/* Sprint +1: a dedicated 'Proposer un artiste' form is
+                  coming. For this release we keep the existing workshop
+                  submit (still useful for profs) but relabel it to match
+                  the new positioning. */}
+              <SubmitEntryButton type="workshop" customLabel="+ PROPOSER UN ARTISTE" />
             </View>
           </View>
         }
