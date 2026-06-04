@@ -148,7 +148,14 @@ class Entry(BaseModel):
     cover_photo: Optional[str] = None
     is_live_music: Optional[bool] = None       # 🎺 badge "Live music"
     recurrence_label: Optional[str] = None     # e.g. "Chaque jeudi", "Chaque mois"
-    featured: bool = False  # legacy: use status='featured' instead
+    # 3 orthogonal dimensions (sprint refactor):
+    #   - status         : moderation state (pending/approved/rejected)
+    #   - is_featured    : editorial pick → home "Coups de cœur" carousel
+    #   - partner_status : business deal → 'Mensuelles' tab + ✨ Partner badge
+    is_featured: bool = False
+    partner_status: str = "none"               # 'none' | 'partner' | 'premium_partner'
+    admin_locked: bool = False                 # gcal sync skips this entry if True
+    featured: bool = False  # legacy: use is_featured + status='approved' instead
     status: str = "approved"  # 'pending' | 'approved' | 'featured'
     submitter_name: Optional[str] = ""
     submitter_email: Optional[str] = ""
@@ -181,6 +188,9 @@ class EntryCreate(BaseModel):
     is_mensuelle: bool = False
     cover_photo: Optional[str] = None
     featured: bool = False
+    is_featured: Optional[bool] = None       # admin pick → home Coups de cœur
+    partner_status: Optional[str] = None     # 'none' | 'partner' | 'premium_partner'
+    admin_locked: Optional[bool] = None      # gcal sync skips this entry if True
     status: Optional[str] = None
     recurrence: Optional[Recurrence] = None
 
@@ -802,19 +812,35 @@ async def list_entries(
     if type:
         if type not in VALID_TYPES:
             raise HTTPException(status_code=400, detail="Invalid type")
-        if type == "mensuelle":
-            # MENSUELLES = entries explicitly typed 'mensuelle' OR any entry
-            # flagged is_mensuelle=true (so admins can promote a soirée/workshop
-            # into the monthly rendez-vous list without changing its main type).
-            extra_and.append({"$or": [{"type": "mensuelle"}, {"is_mensuelle": True}]})
+        if type == "soiree":
+            # SOIRÉES tab (sprint refactor): merge soiree + mensuelle into a
+            # single chronological timeline. Mensuelles are also "soirées"
+            # for the visitor — they just additionally show up in the
+            # dedicated Mensuelles tab (filtered by partner_status).
+            extra_and.append({"$or": [
+                {"type": "soiree"},
+                {"type": "mensuelle"},
+                {"is_mensuelle": True},
+            ]})
+        elif type == "mensuelle":
+            # MENSUELLES tab (sprint refactor): partner-only listing.
+            # Strict: type='mensuelle' AND partner_status in ('partner',
+            # 'premium_partner'). Past behaviour kept the is_mensuelle
+            # legacy flag — we drop it here so the tab stays curated.
+            extra_and.append({"$and": [
+                {"$or": [{"type": "mensuelle"}, {"is_mensuelle": True}]},
+                {"partner_status": {"$in": ["partner", "premium_partner"]}},
+            ]})
         else:
             query["type"] = type
     if featured is not None:
-        # Legacy: also map to status='featured'
+        # Sprint refactor: featured is now its OWN dimension (is_featured)
+        # — orthogonal to partner_status and to the moderation status.
+        # Keep the legacy status='featured' path too for back-compat.
         if featured:
-            query["status"] = "featured"
+            query["$or"] = [{"is_featured": True}, {"status": "featured"}]
         else:
-            query["status"] = {"$ne": "featured"}
+            query["is_featured"] = {"$ne": True}
     if level:
         query["level"] = level
     if category:
@@ -862,11 +888,17 @@ async def list_entries(
 
     if extra_and:
         # Compose multiple $or-clauses safely using $and
-        if len(extra_and) == 1 and "$or" in extra_and[0] and "$and" not in query:
-            # Common path: a single $or clause — set it directly
+        if len(extra_and) == 1 and "$or" in extra_and[0] and "$and" not in query and "$or" not in query:
+            # Common path: a single $or clause AND query has no other $or
+            # → set it directly. If query already has $or (e.g. from the
+            # featured filter), we MUST keep both via $and.
             query["$or"] = extra_and[0]["$or"]
         else:
-            query["$and"] = extra_and
+            existing_and = query.pop("$and", [])
+            if "$or" in query:
+                # Move the existing $or into $and so it doesn't get overwritten
+                extra_and.append({"$or": query.pop("$or")})
+            query["$and"] = existing_and + extra_and
 
     # Performance: festival covers can be 1-2MB of base64 each (68 festivals
     # = multi-MB payload). For the FESTIVAL listing only, strip cover_photo
@@ -1576,6 +1608,11 @@ async def update_entry(
         norm_end = normalize_date_to_iso(update.get("end_date"))
         if norm_end:
             update["end_date"] = norm_end
+    # Commit D: if the admin edits an entry coming from the gcal sync, lock
+    # it so the next sync run doesn't overwrite their changes. The lock is
+    # released via POST /api/admin/entries/{id}/reset-gcal.
+    if existing.get("source") == "gcal" and "admin_locked" not in update:
+        update["admin_locked"] = True
     if "featured" in update:
         if update["featured"]:
             update["status"] = "featured"
@@ -2101,6 +2138,11 @@ async def sync_gcal_to_pending() -> dict:
             if existing.get("status") == "rejected":
                 stats["skipped"] += 1
                 continue
+            # Commit D: admin has manually edited this entry. Preserve their
+            # changes — do NOT overwrite anything on subsequent syncs.
+            if existing.get("admin_locked"):
+                stats["unchanged"] += 1
+                continue
             existing_sig = {
                 k: existing.get(k) if k in ("is_live_music",)
                 else (existing.get(k) or ("" if k not in ("end_date", "recurrence_label") else None))
@@ -2196,6 +2238,31 @@ def _normalize_for_dedup(s: str) -> str:
     s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
     s = re.sub(r"\s+", " ", s).strip().lower()
     return s
+
+
+@api_router.post("/admin/entries/{entry_id}/reset-gcal")
+async def reset_gcal_override(
+    entry_id: str, _user: User = Depends(require_admin)
+):
+    """Commit D — undo manual override on a gcal-sourced entry.
+
+    Clears `admin_locked` so the next sync run will re-pull the canonical
+    iCal data and overwrite the admin's local edits. Used when the admin
+    realises Google Calendar already has the right info and they want to
+    drop their override.
+    """
+    existing = await db.entries.find_one({"id": entry_id}, {"_id": 0, "source": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if existing.get("source") != "gcal":
+        raise HTTPException(status_code=400, detail="Cet event n'a pas de source iCal — rien à réinitialiser")
+    await db.entries.update_one(
+        {"id": entry_id}, {"$set": {"admin_locked": False}}
+    )
+    # Force a sync now so the admin sees the canonical version immediately.
+    _ical_cache["at"] = None
+    stats = await sync_gcal_to_pending()
+    return {"ok": True, "sync_stats": stats}
 
 
 @api_router.post("/calendar/sync")
